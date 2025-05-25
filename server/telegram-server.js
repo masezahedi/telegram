@@ -13,7 +13,16 @@ const API_ID = 24554364;
 const API_HASH = "5db6997246b3bc3b6a8ac6097b1ef937";
 
 const app = express();
-app.use(cors());
+
+// Update CORS configuration
+app.use(
+  cors({
+    origin: "*", // Be more specific in production
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
 // Database connection
@@ -418,7 +427,7 @@ async function stopUserServices(userId) {
 async function initializeAllServices() {
   try {
     const db = await openDb();
-    
+
     // Get all users with active services
     const users = await db.all(`
       SELECT DISTINCT u.id
@@ -434,9 +443,9 @@ async function initializeAllServices() {
       await startUserServices(user.id);
     }
 
-    console.log('All active services initialized successfully');
+    console.log("All active services initialized successfully");
   } catch (err) {
-    console.error('Error initializing services:', err);
+    console.error("Error initializing services:", err);
   }
 }
 
@@ -589,6 +598,10 @@ app.post("/services/stop", async (req, res) => {
 // Initialize all services on server start
 initializeAllServices();
 
-// Start server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Update server listening configuration
+const PORT = process.env.PORT || 1332;
+const HOST = "0.0.0.0"; // Listen on all network interfaces
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+});
