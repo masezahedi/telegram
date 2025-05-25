@@ -18,9 +18,6 @@ const nextConfig = {
     }
     return config;
   },
-  // Add hostname and port configuration
-  hostname: "0.0.0.0",
-  port: 3332,
 };
 
 module.exports = nextConfig;
