@@ -13,7 +13,7 @@ router.post("/sendCode", async (req, res) => {
       proxy: {
         socksType: 5,
         ip: "127.0.0.1",
-        port: 99199,
+        port: 65555,
       },
     });
 
