@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "next-app",
+      name: "telegram-service-client",
       script: "node_modules/next/dist/bin/next",
       args: "start",
       cwd: "/root/apps/telegram",
@@ -12,7 +12,7 @@ module.exports = {
       exec_mode: "fork",
     },
     {
-      name: "telegram-server",
+      name: "telegram-service-server",
       script: "server/telegram-server.js",
       cwd: "/root/apps/telegram",
       env: {
