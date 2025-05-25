@@ -3,10 +3,11 @@ module.exports = {
     {
       name: "next-app",
       script: "node_modules/next/dist/bin/next",
-      args: "start -p 3332",
+      args: "start",
       cwd: "/root/apps/telegram",
       env: {
         NODE_ENV: "production",
+        PORT: 3332
       },
       exec_mode: "fork",
     },
