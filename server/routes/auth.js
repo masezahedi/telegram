@@ -9,7 +9,13 @@ const router = express.Router();
 router.post("/sendCode", async (req, res) => {
   try {
     const { phoneNumber } = req.body;
-    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH);
+    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
+      proxy: {
+        socksType: 5,
+        ip: "127.0.0.1",
+        port: 99199,
+      },
+    });
 
     await client.connect();
 

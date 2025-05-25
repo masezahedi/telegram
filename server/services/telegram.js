@@ -112,7 +112,9 @@ async function startForwardingService(service, client, geminiApiKey) {
 // Get channel entity
 async function getChannelEntity(client, username) {
   try {
-    const formattedUsername = username.startsWith("@") ? username : `@${username}`;
+    const formattedUsername = username.startsWith("@")
+      ? username
+      : `@${username}`;
     const entity = await client.getEntity(formattedUsername);
     console.log(`Successfully connected to channel: ${formattedUsername}`, {
       id: entity.id,
@@ -240,6 +242,11 @@ async function startUserServices(userId) {
         {
           connectionRetries: 5,
           useWSS: true,
+          proxy: {
+            socksType: 5,
+            ip: "127.0.0.1",
+            port: 99199,
+          },
         }
       );
 
@@ -324,9 +331,9 @@ async function initializeAllServices() {
       await startUserServices(user.id);
     }
 
-    console.log('All active services initialized successfully');
+    console.log("All active services initialized successfully");
   } catch (err) {
-    console.error('Error initializing services:', err);
+    console.error("Error initializing services:", err);
   }
 }
 
