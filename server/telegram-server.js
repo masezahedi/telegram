@@ -353,12 +353,7 @@ async function startUserServices(userId) {
         API_HASH,
         {
           connectionRetries: 5,
-          useWSS: false,
-          proxy: {
-            socksType: 5,
-            ip: "127.0.0.1",
-            port: 65534,
-          },
+          useWSS: true,
         }
       );
 
@@ -458,13 +453,7 @@ async function initializeAllServices() {
 app.post("/sendCode", async (req, res) => {
   try {
     const { phoneNumber } = req.body;
-    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
-      proxy: {
-        socksType: 5,
-        ip: "127.0.0.1",
-        port: 65534,
-      },
-    });
+    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH);
 
     await client.connect();
 
