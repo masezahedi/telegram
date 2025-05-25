@@ -7,7 +7,7 @@ module.exports = {
       cwd: "/root/apps/telegram",
       env: {
         NODE_ENV: "production",
-        PORT: 1332
+        PORT: 1332,
       },
       exec_mode: "fork",
     },
