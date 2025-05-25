@@ -2,12 +2,12 @@ module.exports = {
   apps: [
     {
       name: "next-app",
-      script: "npm",
-      args: "start",
+      script: "node_modules/.bin/next",
+      args: "start -p 3332",
       env: {
-        PORT: 3332,
         NODE_ENV: "production",
       },
+      exec_mode: "fork",
     },
     {
       name: "telegram-server",
