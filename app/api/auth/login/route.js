@@ -58,7 +58,8 @@ export async function POST(request) {
         name: user.name,
         email: user.email,
         telegramSession: user.telegram_session,
-        phoneNumber: user.phone_number
+        phoneNumber: user.phone_number,
+        is_admin: Boolean(user.is_admin)
       },
     });
   } catch (error) {

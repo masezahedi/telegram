@@ -3,12 +3,12 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  images: { 
+  images: {
     unoptimized: true,
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'images.pexels.com',
+        protocol: "https",
+        hostname: "images.pexels.com",
       },
     ],
   },
@@ -18,6 +18,9 @@ const nextConfig = {
     }
     return config;
   },
+  // Add hostname and port configuration
+  hostname: "0.0.0.0",
+  port: 3332,
 };
 
 module.exports = nextConfig;

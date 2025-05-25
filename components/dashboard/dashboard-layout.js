@@ -12,7 +12,8 @@ import {
   User, 
   Home, 
   Settings, 
-  MessageCircle
+  MessageCircle,
+  Users
 } from 'lucide-react';
 import { AuthService } from '@/lib/services/auth-service';
 import ConnectionStatus from '@/components/dashboard/connection-status';
@@ -82,6 +83,13 @@ export default function DashboardLayout({ children, user }) {
                           <MessageCircle className="ml-2 h-5 w-5" /> سرویس‌ها
                         </Button>
                       </Link>
+                      {user?.isAdmin && (
+                        <Link href="/dashboard/users" passHref>
+                          <Button variant="ghost" className="w-full justify-start">
+                            <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
+                          </Button>
+                        </Link>
+                      )}
                     </nav>
                   </div>
                   <div className="py-4">
@@ -141,6 +149,13 @@ export default function DashboardLayout({ children, user }) {
                     <MessageCircle className="ml-2 h-5 w-5" /> سرویس‌ها
                   </Button>
                 </Link>
+                {user?.isAdmin && (
+                  <Link href="/dashboard/users" passHref>
+                    <Button variant="ghost" className="w-full justify-start">
+                      <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
+                    </Button>
+                  </Link>
+                )}
               </nav>
             </div>
           </div>

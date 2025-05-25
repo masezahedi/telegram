@@ -52,13 +52,23 @@ const createPromptTemplate = (originalText, customTemplate) => {
   }
 
   try {
-    // می‌تونید هر ساختاری که می‌خواید بسازید
     return `${customTemplate}: ${originalText}`;
   } catch (err) {
     console.error("Error applying prompt template:", err);
     return originalText;
   }
 };
+
+// Send notification to user
+async function sendNotificationToUser(client, message) {
+  try {
+    const me = await client.getMe();
+    await client.sendMessage(me, { message });
+    console.log("Notification sent to user");
+  } catch (err) {
+    console.error("Error sending notification to user:", err);
+  }
+}
 
 // Start forwarding service
 async function startForwardingService(service, client, geminiApiKey) {
@@ -89,7 +99,6 @@ async function startForwardingService(service, client, geminiApiKey) {
     const sourceEntities = await Promise.all(
       sourceChannels.map(async (username) => {
         try {
-          // Add @ if not present
           const formattedUsername = username.startsWith("@")
             ? username
             : `@${username}`;
@@ -110,7 +119,6 @@ async function startForwardingService(service, client, geminiApiKey) {
       })
     );
 
-    // Filter out any null entities
     const validSourceEntities = sourceEntities.filter(
       (entity) => entity !== null
     );
@@ -123,7 +131,6 @@ async function startForwardingService(service, client, geminiApiKey) {
     const targetEntities = await Promise.all(
       targetChannels.map(async (username) => {
         try {
-          // Add @ if not present
           const formattedUsername = username.startsWith("@")
             ? username
             : `@${username}`;
@@ -144,7 +151,6 @@ async function startForwardingService(service, client, geminiApiKey) {
       })
     );
 
-    // Filter out any null entities
     const validTargetEntities = targetEntities.filter(
       (entity) => entity !== null
     );
@@ -157,25 +163,12 @@ async function startForwardingService(service, client, geminiApiKey) {
       throw new Error("No valid target channels found");
     }
 
-    // Send activation message to all target channels
+    // Send activation message to user
     const activationTime = new Date().toLocaleString("fa-IR", {
       timeZone: "Asia/Tehran",
     });
-    const activationMessage = `🟢 سرویس فوروارد فعال شد\n⏰ ${activationTime}`;
-
-    for (const targetEntity of validTargetEntities) {
-      try {
-        await client.sendMessage(targetEntity, { message: activationMessage });
-        console.log(
-          `Sent activation message to channel: ${targetEntity.username}`
-        );
-      } catch (err) {
-        console.error(
-          `Error sending activation message to ${targetEntity.username}:`,
-          err
-        );
-      }
-    }
+    const activationMessage = `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`;
+    await sendNotificationToUser(client, activationMessage);
 
     // Create event handler for new messages
     const eventHandler = async (event) => {
@@ -192,7 +185,6 @@ async function startForwardingService(service, client, geminiApiKey) {
           return;
         }
 
-        // Get the channel ID where the message was sent
         const channelId = message.peerId?.channelId;
         console.log("Message channel ID:", channelId);
 
@@ -201,7 +193,6 @@ async function startForwardingService(service, client, geminiApiKey) {
           return;
         }
 
-        // Check if message is from one of the source channels
         const sourceEntity = validSourceEntities.find((entity) => {
           const sourceId = entity.id.value;
           const msgChannelId = channelId.value;
@@ -226,16 +217,13 @@ async function startForwardingService(service, client, geminiApiKey) {
           `Processing message from channel: ${sourceEntity.username}`
         );
 
-        // Get message text and media
         let text = message.message || "";
         let media = message.media;
 
-        // Handle message with media and caption
         if (media && media.caption) {
           text = media.caption;
         }
 
-        // Apply Gemini translation if enabled and available
         if (useAI && genAI && text) {
           try {
             console.log("Processing text with AI");
@@ -249,12 +237,10 @@ async function startForwardingService(service, client, geminiApiKey) {
             console.log("AI processing successful");
           } catch (err) {
             console.error("AI processing error:", err);
-            // On AI error, use original text
             console.log("Using original text due to AI error");
           }
         }
 
-        // Apply search/replace rules
         if (text && searchReplaceRules.length > 0) {
           console.log("Applying search/replace rules");
           for (const rule of searchReplaceRules) {
@@ -264,7 +250,6 @@ async function startForwardingService(service, client, geminiApiKey) {
           }
         }
 
-        // Forward to all target channels
         for (const targetEntity of validTargetEntities) {
           try {
             console.log(`Forwarding to channel: ${targetEntity.username}`);
@@ -292,7 +277,6 @@ async function startForwardingService(service, client, geminiApiKey) {
       }
     };
 
-    // Add event handler with specific chats filter
     const sourceIds = validSourceEntities.map((entity) => entity.id);
     console.log("Setting up event handler for source channels:", sourceIds);
 
@@ -306,7 +290,6 @@ async function startForwardingService(service, client, geminiApiKey) {
 
     console.log(`Service ${serviceId} started successfully`);
 
-    // Store event handler reference for later removal
     if (!activeServices.has(service.user_id)) {
       activeServices.set(service.user_id, new Map());
     }
@@ -324,7 +307,6 @@ async function startUserServices(userId) {
   try {
     const db = await openDb();
 
-    // Get user's Telegram session and settings
     const user = await db.get(
       `
       SELECT u.telegram_session, us.gemini_api_key
@@ -340,7 +322,6 @@ async function startUserServices(userId) {
       return;
     }
 
-    // Get active services
     const services = await db.all(
       `
       SELECT *
@@ -355,7 +336,6 @@ async function startUserServices(userId) {
       return;
     }
 
-    // Create or get existing Telegram client
     let client = activeClients.get(userId);
     if (!client) {
       client = new TelegramClient(
@@ -376,7 +356,6 @@ async function startUserServices(userId) {
       activeClients.set(userId, client);
     }
 
-    // Start each service
     for (const service of services) {
       await startForwardingService(service, client, user.gemini_api_key);
     }
@@ -401,7 +380,6 @@ async function stopService(userId, serviceId) {
         }
         userServices.delete(serviceId);
 
-        // Only disconnect client if no more active services
         if (userServices.size === 0) {
           if (client) {
             await client.disconnect();
@@ -436,6 +414,32 @@ async function stopUserServices(userId) {
   }
 }
 
+// Initialize all active services on server start
+async function initializeAllServices() {
+  try {
+    const db = await openDb();
+    
+    // Get all users with active services
+    const users = await db.all(`
+      SELECT DISTINCT u.id
+      FROM users u
+      INNER JOIN forwarding_services fs ON u.id = fs.user_id
+      WHERE fs.is_active = 1
+    `);
+
+    console.log(`Found ${users.length} users with active services`);
+
+    // Start services for each user
+    for (const user of users) {
+      await startUserServices(user.id);
+    }
+
+    console.log('All active services initialized successfully');
+  } catch (err) {
+    console.error('Error initializing services:', err);
+  }
+}
+
 // API Routes
 app.post("/sendCode", async (req, res) => {
   try {
@@ -453,7 +457,6 @@ app.post("/sendCode", async (req, res) => {
       })
     );
 
-    // Store client temporarily
     activeClients.set(phoneNumber, {
       client,
       phoneCodeHash: result.phoneCodeHash,
@@ -582,6 +585,9 @@ app.post("/services/stop", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Initialize all services on server start
+initializeAllServices();
 
 // Start server
 const PORT = process.env.PORT || 3001;
