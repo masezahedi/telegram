@@ -241,7 +241,7 @@ async function startUserServices(userId) {
         API_HASH,
         {
           connectionRetries: 5,
-          useWSS: true,
+          useWSS: false,
           proxy: {
             socksType: 5,
             ip: "127.0.0.1",
