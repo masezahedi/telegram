@@ -14,24 +14,15 @@ const API_HASH = "5db6997246b3bc3b6a8ac6097b1ef937";
 
 const app = express();
 
-// Environment configuration
-const isProduction = process.env.NODE_ENV === "production";
-const PORT = process.env.PORT || 3332;
-const HOST = isProduction ? "0.0.0.0" : "localhost";
-
-// CORS configuration - فقط یکبار و در ابتدا
+// Update CORS configuration
 app.use(
   cors({
-    origin: isProduction
-      ? ["https://sna.freebotmoon.ir", "http://sna.freebotmoon.ir"]
-      : "*",
+    origin: "*", // Be more specific in production
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
   })
 );
 
-// Body parser middleware
 app.use(express.json());
 
 // Database connection
@@ -458,23 +449,14 @@ async function initializeAllServices() {
   }
 }
 
+const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 // API Routes
-app.post("/sendCode", async (req, res) => {
+app.post(`${apiUrl}/sendCode`, async (req, res) => {
   try {
-    console.log("SendCode request received:", req.body);
     const { phoneNumber } = req.body;
-
-    if (!phoneNumber) {
-      return res.status(400).json({ error: "Phone number is required" });
-    }
-
-    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
-      connectionRetries: 5,
-      useWSS: true,
-    });
+    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH);
 
     await client.connect();
-    console.log("Telegram client connected for sendCode");
 
     const result = await client.invoke(
       new Api.auth.SendCode({
@@ -490,7 +472,6 @@ app.post("/sendCode", async (req, res) => {
       phoneCodeHash: result.phoneCodeHash,
     });
 
-    console.log("Code sent successfully for:", phoneNumber);
     res.json({
       success: true,
       phoneCodeHash: result.phoneCodeHash,
@@ -501,7 +482,7 @@ app.post("/sendCode", async (req, res) => {
   }
 });
 
-app.post("/signIn", async (req, res) => {
+app.post(`${apiUrl}/signIn`, async (req, res) => {
   try {
     const { phoneNumber, code } = req.body;
     const data = activeClients.get(phoneNumber);
@@ -540,7 +521,7 @@ app.post("/signIn", async (req, res) => {
   }
 });
 
-app.post("/checkPassword", async (req, res) => {
+app.post(`${apiUrl}/checkPassword`, async (req, res) => {
   try {
     const { phoneNumber, password } = req.body;
     const data = activeClients.get(phoneNumber);
@@ -615,22 +596,30 @@ app.post("/services/stop", async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
-  });
-});
-
 // Initialize all services on server start
 initializeAllServices();
 
-// Start server
+// Update server listening configuration
+const isProduction = process.env.NODE_ENV === "production";
+const PORT = process.env.PORT || 3332;
+
+// برای production روی تمامی network interfaces listen کنید
+const HOST = isProduction ? "0.0.0.0" : "localhost";
+
 app.listen(PORT, HOST, () => {
   const displayHost = isProduction ? "sna.freebotmoon.ir" : HOST;
   console.log(`Server running on http://${displayHost}:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`Listening on: ${HOST}:${PORT}`);
 });
+
+// همچنین در قسمت CORS، برای production محدودیت اعمال کنید:
+app.use(
+  cors({
+    origin: isProduction
+      ? ["https://sna.freebotmoon.ir", "http://sna.freebotmoon.ir"]
+      : "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
