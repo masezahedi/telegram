@@ -599,8 +599,9 @@ app.post("/services/stop", async (req, res) => {
 initializeAllServices();
 
 // Update server listening configuration
+const isProduction = process.env.NODE_ENV === "production";
 const PORT = 3332;
-const HOST = "localhost"; // Listen on all network interfaces
+const HOST = isProduction ? "sna.freebotmoon.ir" : "localhost"; // Listen on all network interfaces
 
 app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
