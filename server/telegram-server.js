@@ -600,7 +600,7 @@ initializeAllServices();
 
 // Update server listening configuration
 const PORT = 3332;
-const HOST = "0.0.0.0"; // Listen on all network interfaces
+const HOST = "localhost"; // Listen on all network interfaces
 
 app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
