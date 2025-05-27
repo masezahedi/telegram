@@ -599,7 +599,7 @@ app.post("/services/stop", async (req, res) => {
 initializeAllServices();
 
 // Update server listening configuration
-const PORT = process.env.PORT || 1332;
+const PORT = 3332;
 const HOST = "0.0.0.0"; // Listen on all network interfaces
 
 app.listen(PORT, HOST, () => {
