@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { openDb } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {

@@ -1,30 +1,30 @@
-import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/auth';
-import { openDb } from '@/lib/db';
+import { NextResponse } from "next/server";
+import { verifyToken } from "@/lib/auth";
+import { openDb } from "@/lib/db";
+export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
-    const token = request.headers.get('authorization')?.split(' ')[1];
+    const token = request.headers.get("authorization")?.split(" ")[1];
     const decoded = await verifyToken(token);
-    
+
     if (!decoded) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
 
     const db = await openDb();
-    
+
     // Check if user is admin
-    const adminCheck = await db.get(
-      'SELECT is_admin FROM users WHERE id = ?',
-      [decoded.userId]
-    );
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
+      decoded.userId,
+    ]);
 
     if (!adminCheck?.is_admin) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
@@ -45,9 +45,9 @@ export async function GET(request) {
 
     return NextResponse.json({ success: true, users });
   } catch (error) {
-    console.error('Get users error:', error);
+    console.error("Get users error:", error);
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: "Internal server error" },
       { status: 500 }
     );
   }
