@@ -8,6 +8,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PORT: 1332,
+        NEXT_PUBLIC_API_URL: "https://sna.freebotmoon.ir:3332",
       },
       exec_mode: "fork",
     },
@@ -18,6 +19,7 @@ module.exports = {
       env: {
         PORT: 3332,
         NODE_ENV: "production",
+        HOST: "0.0.0.0",
       },
     },
   ],

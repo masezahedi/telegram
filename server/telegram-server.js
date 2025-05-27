@@ -600,9 +600,25 @@ initializeAllServices();
 
 // Update server listening configuration
 const isProduction = process.env.NODE_ENV === "production";
-const PORT = 3332;
-const HOST = "sna.freebotmoon.ir"; // Listen on all network interfaces
+const PORT = process.env.PORT || 3332;
+
+// برای production روی تمامی network interfaces listen کنید
+const HOST = isProduction ? "0.0.0.0" : "localhost";
 
 app.listen(PORT, HOST, () => {
-  console.log(`Server running on http://${HOST}:${PORT}`);
+  const displayHost = isProduction ? "sna.freebotmoon.ir" : HOST;
+  console.log(`Server running on http://${displayHost}:${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`Listening on: ${HOST}:${PORT}`);
 });
+
+// همچنین در قسمت CORS، برای production محدودیت اعمال کنید:
+app.use(
+  cors({
+    origin: isProduction
+      ? ["https://sna.freebotmoon.ir", "http://sna.freebotmoon.ir"]
+      : "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
