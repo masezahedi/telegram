@@ -449,7 +449,7 @@ async function initializeAllServices() {
   }
 }
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+const apiUrl = "http://sna.freebotmoon.ir:1332/";
 // API Routes
 app.post(`${apiUrl}/sendCode`, async (req, res) => {
   try {
