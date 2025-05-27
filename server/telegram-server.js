@@ -19,7 +19,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 3332;
 const HOST = isProduction ? "0.0.0.0" : "localhost";
 
-// CORS configuration - تنها یک بار و در جای درست
+// CORS configuration
 const corsOptions = {
   origin: isProduction
     ? [
@@ -78,7 +78,7 @@ const createPromptTemplate = (originalText, customTemplate) => {
   }
 
   try {
-    return `${customTemplate}: ${originalText}`;
+    return customTemplate.replace("{text}", originalText);
   } catch (err) {
     console.error("Error applying prompt template:", err);
     return originalText;
@@ -93,6 +93,49 @@ async function sendNotificationToUser(client, message) {
     console.log("Notification sent to user");
   } catch (err) {
     console.error("Error sending notification to user:", err);
+  }
+}
+
+// Create Telegram client with retry mechanism
+async function createTelegramClient(session) {
+  const client = new TelegramClient(
+    new StringSession(session),
+    API_ID,
+    API_HASH,
+    {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+      retryDelay: 2000,
+      autoReconnect: true,
+      downloadRetries: 5,
+      floodSleepThreshold: 60,
+      deviceModel: "Server",
+      systemVersion: "1.0",
+      appVersion: "1.0",
+    }
+  );
+
+  try {
+    await client.connect();
+
+    // Add reconnection handler
+    client.addEventHandler(async (update) => {
+      if (!client.connected) {
+        console.log("Connection lost, attempting to reconnect...");
+        try {
+          await client.connect();
+          console.log("Reconnected successfully");
+        } catch (e) {
+          console.error("Reconnection failed:", e);
+        }
+      }
+    });
+
+    return client;
+  } catch (err) {
+    console.error("Error creating Telegram client:", err);
+    throw err;
   }
 }
 
@@ -121,164 +164,68 @@ async function startForwardingService(service, client, geminiApiKey) {
       console.log("Initialized Gemini AI");
     }
 
-    // Get source channel entities
+    // Get source and target entities with retry
+    async function getEntityWithRetry(username, retries = 3) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const formattedUsername = username.startsWith("@")
+            ? username
+            : `@${username}`;
+          const entity = await client.getEntity(formattedUsername);
+          console.log(
+            `Successfully connected to channel: ${formattedUsername}`,
+            {
+              id: entity.id,
+              username: entity.username,
+              type: entity.className,
+            }
+          );
+          return entity;
+        } catch (err) {
+          console.error(
+            `Attempt ${i + 1}/${retries} failed for ${username}:`,
+            err
+          );
+          if (i === retries - 1) return null;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+      return null;
+    }
+
     const sourceEntities = await Promise.all(
-      sourceChannels.map(async (username) => {
-        try {
-          const formattedUsername = username.startsWith("@")
-            ? username
-            : `@${username}`;
-          const entity = await client.getEntity(formattedUsername);
-          console.log(
-            `Successfully connected to source channel: ${formattedUsername}`,
-            {
-              id: entity.id,
-              username: entity.username,
-              type: entity.className,
-            }
-          );
-          return entity;
-        } catch (err) {
-          console.error(`Error getting source entity for ${username}:`, err);
-          return null;
-        }
-      })
+      sourceChannels.map((username) => getEntityWithRetry(username))
     );
 
-    const validSourceEntities = sourceEntities.filter(
-      (entity) => entity !== null
-    );
-    console.log(
-      `Valid source channels: ${validSourceEntities.length}`,
-      validSourceEntities.map((e) => ({ id: e.id, username: e.username }))
-    );
-
-    // Get target channel entities
     const targetEntities = await Promise.all(
-      targetChannels.map(async (username) => {
-        try {
-          const formattedUsername = username.startsWith("@")
-            ? username
-            : `@${username}`;
-          const entity = await client.getEntity(formattedUsername);
-          console.log(
-            `Successfully connected to target channel: ${formattedUsername}`,
-            {
-              id: entity.id,
-              username: entity.username,
-              type: entity.className,
-            }
-          );
-          return entity;
-        } catch (err) {
-          console.error(`Error getting target entity for ${username}:`, err);
-          return null;
-        }
-      })
+      targetChannels.map((username) => getEntityWithRetry(username))
     );
 
-    const validTargetEntities = targetEntities.filter(
-      (entity) => entity !== null
-    );
-    console.log(
-      `Valid target channels: ${validTargetEntities.length}`,
-      validTargetEntities.map((e) => ({ id: e.id, username: e.username }))
-    );
+    const validSourceEntities = sourceEntities.filter((e) => e !== null);
+    const validTargetEntities = targetEntities.filter((e) => e !== null);
+
+    if (validSourceEntities.length === 0) {
+      throw new Error("No valid source channels found");
+    }
 
     if (validTargetEntities.length === 0) {
       throw new Error("No valid target channels found");
     }
 
-    // Send activation message to user
-    const activationTime = new Date().toLocaleString("fa-IR", {
-      timeZone: "Asia/Tehran",
-    });
-    const activationMessage = `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`;
-    await sendNotificationToUser(client, activationMessage);
+    // Create message handler with rate limiting
+    const messageQueue = [];
+    let processingQueue = false;
 
-    // Create event handler for new messages
-    const eventHandler = async (event) => {
-      try {
-        console.log("Received new message event", {
-          messageId: event.message?.id,
-          fromId: event.message?.fromId,
-          peerId: event.message?.peerId,
-        });
+    async function processMessageQueue() {
+      if (processingQueue || messageQueue.length === 0) return;
 
-        const message = event.message;
-        if (!message) {
-          console.log("No message in event");
-          return;
-        }
+      processingQueue = true;
 
-        const channelId = message.peerId?.channelId;
-        console.log("Message channel ID:", channelId);
-
-        if (!channelId) {
-          console.log("Not a channel message");
-          return;
-        }
-
-        const sourceEntity = validSourceEntities.find((entity) => {
-          const sourceId = entity.id.value;
-          const msgChannelId = channelId.value;
-          const match = sourceId === msgChannelId;
-          console.log("Comparing channel IDs:", {
-            sourceId,
-            messageChannelId: msgChannelId,
-            matches: match,
-          });
-          return match;
-        });
-
-        if (!sourceEntity) {
-          console.log(
-            "Message not from source channel. Source channels:",
-            validSourceEntities.map((e) => ({ id: e.id, username: e.username }))
-          );
-          return;
-        }
-
-        console.log(
-          `Processing message from channel: ${sourceEntity.username}`
-        );
-
-        let text = message.message || "";
-        let media = message.media;
-
-        if (media && media.caption) {
-          text = media.caption;
-        }
-
-        if (useAI && genAI && text) {
-          try {
-            console.log("Processing text with AI");
-            const model = genAI.getGenerativeModel({
-              model: "gemini-2.0-flash",
-            });
-            const prompt = createPromptTemplate(text, promptTemplate);
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            text = response.text().trim();
-            console.log("AI processing successful");
-          } catch (err) {
-            console.error("AI processing error:", err);
-            console.log("Using original text due to AI error");
-          }
-        }
-
-        if (text && searchReplaceRules.length > 0) {
-          console.log("Applying search/replace rules");
-          for (const rule of searchReplaceRules) {
-            if (rule.search && rule.replace) {
-              text = text.replace(new RegExp(rule.search, "g"), rule.replace);
-            }
-          }
-        }
+      while (messageQueue.length > 0) {
+        const { message, media, text } = messageQueue.shift();
 
         for (const targetEntity of validTargetEntities) {
           try {
-            console.log(`Forwarding to channel: ${targetEntity.username}`);
             if (media) {
               await client.sendFile(targetEntity, {
                 file: media,
@@ -286,36 +233,96 @@ async function startForwardingService(service, client, geminiApiKey) {
                 forceDocument: false,
                 parseMode: "html",
               });
-              console.log("Media message forwarded successfully");
             } else if (text) {
               await client.sendMessage(targetEntity, {
                 message: text,
                 parseMode: "html",
               });
-              console.log("Text message forwarded successfully");
             }
+            // Rate limiting delay
+            await new Promise((resolve) => setTimeout(resolve, 2000));
           } catch (err) {
             console.error(`Error forwarding to ${targetEntity.username}:`, err);
           }
         }
+      }
+
+      processingQueue = false;
+    }
+
+    // Create event handler
+    const eventHandler = async (event) => {
+      try {
+        const message = event.message;
+        if (!message?.peerId?.channelId) return;
+
+        const channelId = message.peerId.channelId;
+        const sourceEntity = validSourceEntities.find(
+          (entity) => entity.id.value === channelId.value
+        );
+
+        if (!sourceEntity) return;
+
+        let text = message.message || "";
+        let media = message.media;
+
+        if (media?.caption) {
+          text = media.caption;
+        }
+
+        // Process with AI if enabled
+        if (genAI && text) {
+          try {
+            const model = genAI.getGenerativeModel({
+              model: "gemini-2.0-flash",
+            });
+            const prompt = createPromptTemplate(text, promptTemplate);
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            text = response.text().trim();
+          } catch (err) {
+            console.error("AI processing error:", err);
+          }
+        }
+
+        // Apply search/replace rules
+        if (text && searchReplaceRules.length > 0) {
+          for (const rule of searchReplaceRules) {
+            if (rule.search && rule.replace) {
+              text = text.replace(new RegExp(rule.search, "g"), rule.replace);
+            }
+          }
+        }
+
+        // Add message to queue
+        messageQueue.push({ message, media, text });
+        processMessageQueue();
       } catch (err) {
         console.error("Message handling error:", err);
       }
     };
 
-    const sourceIds = validSourceEntities.map((entity) => entity.id);
-    console.log("Setting up event handler for source channels:", sourceIds);
-
+    // Set up event handler with specific options
     client.addEventHandler(
       eventHandler,
       new NewMessage({
-        chats: sourceIds,
         incoming: true,
+        outgoing: false,
+        chats: validSourceEntities.map((e) => e.id),
+        fromUsers: false,
       })
     );
 
-    console.log(`Service ${serviceId} started successfully`);
+    // Send activation notification
+    const activationTime = new Date().toLocaleString("fa-IR", {
+      timeZone: "Asia/Tehran",
+    });
+    await sendNotificationToUser(
+      client,
+      `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
+    );
 
+    // Store active service
     if (!activeServices.has(service.user_id)) {
       activeServices.set(service.user_id, new Map());
     }
@@ -328,11 +335,10 @@ async function startForwardingService(service, client, geminiApiKey) {
   }
 }
 
-// Start all active services for a user
+// Start all services for a user
 async function startUserServices(userId) {
   try {
     const db = await openDb();
-
     const user = await db.get(
       `
       SELECT u.telegram_session, us.gemini_api_key
@@ -349,11 +355,7 @@ async function startUserServices(userId) {
     }
 
     const services = await db.all(
-      `
-      SELECT *
-      FROM forwarding_services
-      WHERE user_id = ? AND is_active = 1
-    `,
+      `SELECT * FROM forwarding_services WHERE user_id = ? AND is_active = 1`,
       [userId]
     );
 
@@ -364,21 +366,7 @@ async function startUserServices(userId) {
 
     let client = activeClients.get(userId);
     if (!client) {
-      client = new TelegramClient(
-        new StringSession(user.telegram_session),
-        API_ID,
-        API_HASH,
-        {
-          connectionRetries: 5,
-          useWSS: true,
-        }
-      );
-
-      await client.connect();
-      if (!(await client.isUserAuthorized())) {
-        throw new Error("Telegram session is invalid");
-      }
-
+      client = await createTelegramClient(user.telegram_session);
       activeClients.set(userId, client);
     }
 
@@ -393,7 +381,7 @@ async function startUserServices(userId) {
   }
 }
 
-// Stop specific service for a user
+// Stop specific service
 async function stopService(userId, serviceId) {
   try {
     const userServices = activeServices.get(userId);
@@ -440,12 +428,10 @@ async function stopUserServices(userId) {
   }
 }
 
-// Initialize all active services on server start
+// Initialize all services on server start
 async function initializeAllServices() {
   try {
     const db = await openDb();
-
-    // Get all users with active services
     const users = await db.all(`
       SELECT DISTINCT u.id
       FROM users u
@@ -455,7 +441,6 @@ async function initializeAllServices() {
 
     console.log(`Found ${users.length} users with active services`);
 
-    // Start services for each user
     for (const user of users) {
       await startUserServices(user.id);
     }
@@ -469,14 +454,17 @@ async function initializeAllServices() {
 // API Routes
 app.post("/sendCode", async (req, res) => {
   try {
-    console.log("sendCode request received:", req.body);
     const { phoneNumber } = req.body;
 
     if (!phoneNumber) {
       return res.status(400).json({ error: "Phone number is required" });
     }
 
-    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH);
+    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+    });
 
     await client.connect();
 
@@ -494,7 +482,6 @@ app.post("/sendCode", async (req, res) => {
       phoneCodeHash: result.phoneCodeHash,
     });
 
-    console.log("sendCode successful for:", phoneNumber);
     res.json({
       success: true,
       phoneCodeHash: result.phoneCodeHash,
@@ -619,13 +606,13 @@ app.post("/services/stop", async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
-  });
+// Error handling
+process.on("unhandledRejection", (error) => {
+  console.error("Unhandled rejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught exception:", error);
 });
 
 // Initialize all services on server start
