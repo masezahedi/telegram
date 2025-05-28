@@ -180,6 +180,20 @@ async function processMessage(
 ) {
   try {
     const serviceId = service.id;
+    const messageMap2 = messageMaps.get(serviceId) || new Map();
+    if (!messageMaps.has(serviceId)) {
+      messageMaps.set(serviceId, messageMap2);
+    }
+
+    const channelId2 = message.peerId?.channelId || message.chatId;
+    const messageKey2 = `${channelId2}_${message.id}`;
+
+    if (!isEdit && messageMap.has(messageKey2)) {
+      console.log(
+        `⛔ Service ${serviceId}: پیام تکراری (${messageKey2}) — قبلاً پردازش شده`
+      );
+      return;
+    }
     const targetChannels = JSON.parse(service.target_channels);
     const searchReplaceRules = JSON.parse(service.search_replace_rules);
     const useAI = Boolean(service.prompt_template);
