@@ -581,6 +581,26 @@ async function startForwardingService(service, client, geminiApiKey) {
 // Start all active services for a user
 async function startUserServices(userId) {
   try {
+    const existingClient = activeClients.get(userId);
+    const userActiveServices = activeServices.get(userId);
+
+    if (existingClient && userActiveServices && userActiveServices.size > 0) {
+      console.log(
+        `Stopping ${userActiveServices.size} existing services for user ${userId} before restarting.`
+      );
+      for (const [serviceId, serviceData] of userActiveServices.entries()) {
+        if (serviceData.eventHandler) {
+          existingClient.removeEventHandler(serviceData.eventHandler);
+        }
+        if (serviceData.cleanupInterval) {
+          clearInterval(serviceData.cleanupInterval);
+        }
+        // پاک کردن message map مربوط به این سرویس از حافظه اصلی اگر لازم است
+        // messageMaps.delete(serviceId); // اگر می‌خواهید message map هم با هر بار ریستارت پاک شود
+      }
+      userActiveServices.clear(); // یا activeServices.delete(userId) اگر ساختار Map بیرونی را هم پاک می‌کنید
+    }
+
     const db = await openDb();
 
     const user = await db.get(
