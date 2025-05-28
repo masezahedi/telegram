@@ -1,12 +1,14 @@
 const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const { NewMessage } = require("telegram/events");
+const { NewMessage, Raw } = require("telegram/events");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const express = require("express");
 const cors = require("cors");
 const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
 const jwt = require("jsonwebtoken");
+const fs = require("fs");
+const path = require("path");
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 const API_ID = 24554364;
@@ -19,7 +21,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 3332;
 const HOST = isProduction ? "0.0.0.0" : "localhost";
 
-// CORS configuration - تنها یک بار و در جای درست
+// CORS configuration
 const corsOptions = {
   origin: isProduction
     ? [
@@ -29,10 +31,13 @@ const corsOptions = {
         "http://sna.freebotmoon.ir:1332",
       ]
     : [
+        "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3332",
         "http://localhost:1332",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:1332",
+        "http://127.0.0.1:3332",
       ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -70,8 +75,76 @@ async function verifyToken(token) {
 // Active clients and services store
 const activeClients = new Map();
 const activeServices = new Map();
+const messageMaps = new Map(); // برای نگهداری message mapping هر سرویس
 
-// Create prompt template for Gemini
+// مدت زمان نگهداری پیام‌ها (2 ساعت)
+const MESSAGE_EXPIRY_TIME = 2 * 60 * 60 * 1000;
+
+// تابع‌های مدیریت message mapping
+function getMessageMapFile(serviceId) {
+  return path.join(__dirname, `service_${serviceId}_message_mapping.json`);
+}
+
+function loadMessageMap(serviceId) {
+  try {
+    const filePath = getMessageMapFile(serviceId);
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, "utf8");
+      const parsed = JSON.parse(data);
+
+      const currentTime = Date.now();
+      const loadedMap = new Map();
+
+      for (const [key, value] of Object.entries(parsed)) {
+        if (currentTime - value.timestamp < MESSAGE_EXPIRY_TIME) {
+          loadedMap.set(key, value);
+        }
+      }
+
+      console.log(
+        `📁 Service ${serviceId}: ${loadedMap.size} پیام فعال از فایل بارگذاری شد`
+      );
+      return loadedMap;
+    }
+  } catch (err) {
+    console.error(`❌ خطا در خواندن فایل mapping سرویس ${serviceId}:`, err);
+  }
+  return new Map();
+}
+
+function saveMessageMap(serviceId, messageMap) {
+  try {
+    const filePath = getMessageMapFile(serviceId);
+    const obj = Object.fromEntries(messageMap);
+    fs.writeFileSync(filePath, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error(`❌ خطا در ذخیره فایل mapping سرویس ${serviceId}:`, err);
+  }
+}
+
+function cleanExpiredMessages(serviceId) {
+  const messageMap = messageMaps.get(serviceId);
+  if (!messageMap) return;
+
+  const currentTime = Date.now();
+  let removedCount = 0;
+
+  for (const [key, value] of messageMap.entries()) {
+    if (currentTime - value.timestamp >= MESSAGE_EXPIRY_TIME) {
+      messageMap.delete(key);
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0) {
+    console.log(
+      `🗑️ Service ${serviceId}: ${removedCount} پیام منقضی شده حذف شد`
+    );
+    saveMessageMap(serviceId, messageMap);
+  }
+}
+
+// Create prompt template for Gemini with improved logic
 const createPromptTemplate = (originalText, customTemplate) => {
   if (!customTemplate) {
     return originalText;
@@ -96,29 +169,291 @@ async function sendNotificationToUser(client, message) {
   }
 }
 
-// Start forwarding service
-async function startForwardingService(service, client, geminiApiKey) {
+// تابع پردازش پیام با منطق بهبود یافته
+async function processMessage(
+  message,
+  isEdit,
+  sourceChannelIds,
+  service,
+  client,
+  genAI
+) {
   try {
     const serviceId = service.id;
-    const sourceChannels = JSON.parse(service.source_channels);
     const targetChannels = JSON.parse(service.target_channels);
     const searchReplaceRules = JSON.parse(service.search_replace_rules);
     const useAI = Boolean(service.prompt_template);
     const promptTemplate = service.prompt_template;
 
-    console.log("Starting service with configuration:", {
+    console.log(
+      `📨 Service ${serviceId}: ${
+        isEdit ? "پیام ادیت شده" : "پیام جدید"
+      } (ID: ${message.id})`
+    );
+
+    if (!message) {
+      console.log(`⛔ Service ${serviceId}: پیام خالی`);
+      return;
+    }
+
+    // بررسی اینکه پیام از کانال مبدا باشد
+    const channelId = message.peerId?.channelId || message.chatId;
+    let isFromSourceChannel = false;
+
+    for (const sourceId of sourceChannelIds) {
+      if (channelId && channelId.toString() === sourceId.toString()) {
+        isFromSourceChannel = true;
+        break;
+      }
+    }
+
+    if (!isFromSourceChannel) {
+      console.log(
+        `⛔ Service ${serviceId}: پیام از کانال غیرمبدا نادیده گرفته شد`
+      );
+      return;
+    }
+
+    const originalText = message.message || message.caption;
+
+    // بررسی رسانه
+    const hasMedia =
+      message.media &&
+      message.media.className !== "MessageMediaEmpty" &&
+      message.media.className !== "MessageMediaWebPage";
+
+    if (!originalText && !hasMedia) {
+      console.log(
+        `⛔ Service ${serviceId}: پیام بدون متن و رسانه نادیده گرفته شد`
+      );
+      return;
+    }
+
+    // مدیریت message mapping
+    const messageMap = messageMaps.get(serviceId) || new Map();
+    if (!messageMaps.has(serviceId)) {
+      messageMaps.set(serviceId, messageMap);
+    }
+
+    const messageKey = `${channelId}_${message.id}`;
+    const currentTime = Date.now();
+
+    if (originalText) {
+      console.log(
+        `📝 Service ${serviceId}: متن: ${originalText.substring(0, 100)}${
+          originalText.length > 100 ? "..." : ""
+        }`
+      );
+    }
+
+    if (hasMedia) {
+      console.log(`📷 Service ${serviceId}: رسانه: ${message.media.className}`);
+    }
+
+    // بررسی انقضا برای ادیت
+    if (isEdit) {
+      const existingMessage = messageMap.get(messageKey);
+
+      if (
+        !existingMessage ||
+        currentTime - existingMessage.timestamp >= MESSAGE_EXPIRY_TIME
+      ) {
+        console.log(
+          `⏰ Service ${serviceId}: پیام ادیت شده ولی بیش از 2 ساعت گذشته`
+        );
+        if (existingMessage) {
+          messageMap.delete(messageKey);
+          saveMessageMap(serviceId, messageMap);
+        }
+        return;
+      }
+    }
+
+    let processedText = "";
+
+    // پردازش با AI
+    if (originalText) {
+      if (useAI && genAI) {
+        try {
+          console.log(`🤖 Service ${serviceId}: پردازش با AI`);
+          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+          const prompt = createPromptTemplate(originalText, promptTemplate);
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          processedText = response.text().trim();
+          console.log(`✅ Service ${serviceId}: AI پردازش موفق`);
+        } catch (err) {
+          console.error(`❌ Service ${serviceId}: خطا در AI:`, err);
+          processedText = originalText;
+        }
+      } else {
+        processedText = originalText;
+      }
+
+      // اعمال قوانین جستجو و جایگزینی
+      if (searchReplaceRules && searchReplaceRules.length > 0) {
+        console.log(`🔄 Service ${serviceId}: اعمال قوانین جستجو و جایگزینی`);
+        for (const rule of searchReplaceRules) {
+          if (rule.search && rule.replace) {
+            processedText = processedText.replace(
+              new RegExp(rule.search, "g"),
+              rule.replace
+            );
+          }
+        }
+      }
+    }
+
+    // ارسال به کانال‌های مقصد
+    for (const targetUsername of targetChannels) {
+      try {
+        const formattedUsername = targetUsername.startsWith("@")
+          ? targetUsername
+          : `@${targetUsername}`;
+        const targetEntity = await client.getEntity(formattedUsername);
+
+        if (isEdit && messageMap.has(messageKey)) {
+          // ادیت پیام موجود
+          const existingMessage = messageMap.get(messageKey);
+          const targetMessageId =
+            existingMessage.targetMessageIds?.[targetUsername];
+
+          if (targetMessageId) {
+            try {
+              await client.editMessage(targetEntity, {
+                message: parseInt(targetMessageId),
+                text: processedText,
+              });
+              console.log(
+                `✅ Service ${serviceId}: پیام ادیت شد در ${targetUsername}`
+              );
+
+              // به‌روزرسانی timestamp
+              messageMap.set(messageKey, {
+                ...existingMessage,
+                timestamp: currentTime,
+              });
+            } catch (editError) {
+              console.error(
+                `❌ Service ${serviceId}: خطا در ادیت پیام در ${targetUsername}:`,
+                editError.message
+              );
+
+              // ارسال پیام جدید در صورت عدم موفقیت ادیت
+              const sentMessage = await sendNewMessage(
+                message,
+                processedText,
+                targetEntity,
+                hasMedia,
+                client
+              );
+              if (sentMessage) {
+                if (!existingMessage.targetMessageIds) {
+                  existingMessage.targetMessageIds = {};
+                }
+                existingMessage.targetMessageIds[targetUsername] =
+                  sentMessage.id.toString();
+                existingMessage.timestamp = currentTime;
+                messageMap.set(messageKey, existingMessage);
+              }
+            }
+          }
+        } else {
+          // ارسال پیام جدید
+          const sentMessage = await sendNewMessage(
+            message,
+            processedText,
+            targetEntity,
+            hasMedia,
+            client
+          );
+          if (sentMessage) {
+            const messageData = messageMap.get(messageKey) || {
+              targetMessageIds: {},
+              timestamp: currentTime,
+            };
+            messageData.targetMessageIds[targetUsername] =
+              sentMessage.id.toString();
+            messageData.timestamp = currentTime;
+            messageMap.set(messageKey, messageData);
+            console.log(
+              `💾 Service ${serviceId}: پیام mapping ذخیره شد: ${messageKey} -> ${sentMessage.id}`
+            );
+          }
+        }
+      } catch (err) {
+        console.error(
+          `❌ Service ${serviceId}: خطا در ارسال به ${targetUsername}:`,
+          err
+        );
+      }
+    }
+
+    // ذخیره mapping
+    saveMessageMap(serviceId, messageMap);
+  } catch (err) {
+    console.error(`❌ Service ${service.id}: خطا در پردازش پیام:`, err);
+  }
+}
+
+// تابع ارسال پیام جدید
+async function sendNewMessage(
+  message,
+  finalText,
+  targetChannel,
+  hasValidMedia,
+  client
+) {
+  try {
+    let sentMessage;
+
+    if (hasValidMedia) {
+      console.log(`📤 ارسال رسانه نوع: ${message.media.className}`);
+      sentMessage = await client.sendFile(targetChannel, {
+        file: message.media,
+        caption: finalText,
+        forceDocument: false,
+        parseMode: "html",
+      });
+    } else {
+      console.log("📤 ارسال پیام متنی");
+      sentMessage = await client.sendMessage(targetChannel, {
+        message: finalText,
+        parseMode: "html",
+      });
+    }
+
+    console.log("✅ پیام جدید ارسال شد");
+    return sentMessage;
+  } catch (err) {
+    console.error("❌ خطا در ارسال پیام:", err);
+    return null;
+  }
+}
+
+// Start forwarding service with improved logic
+async function startForwardingService(service, client, geminiApiKey) {
+  try {
+    const serviceId = service.id;
+    const sourceChannels = JSON.parse(service.source_channels);
+    const useAI = Boolean(service.prompt_template);
+
+    console.log(`🚀 Starting service ${serviceId} with configuration:`, {
       serviceId,
       sourceChannels,
-      targetChannels,
       useAI,
-      hasPromptTemplate: Boolean(promptTemplate),
+      hasPromptTemplate: Boolean(service.prompt_template),
     });
 
-    // Initialize Gemini if API key is provided and AI is enabled
+    // بارگذاری message mapping
+    const messageMap = loadMessageMap(serviceId);
+    messageMaps.set(serviceId, messageMap);
+
+    // Initialize Gemini if needed
     let genAI = null;
     if (useAI && geminiApiKey) {
       genAI = new GoogleGenerativeAI(geminiApiKey);
-      console.log("Initialized Gemini AI");
+      console.log(`🤖 Service ${serviceId}: Initialized Gemini AI`);
     }
 
     // Get source channel entities
@@ -130,7 +465,7 @@ async function startForwardingService(service, client, geminiApiKey) {
             : `@${username}`;
           const entity = await client.getEntity(formattedUsername);
           console.log(
-            `Successfully connected to source channel: ${formattedUsername}`,
+            `✅ Service ${serviceId}: Connected to source channel: ${formattedUsername}`,
             {
               id: entity.id,
               username: entity.username,
@@ -139,7 +474,10 @@ async function startForwardingService(service, client, geminiApiKey) {
           );
           return entity;
         } catch (err) {
-          console.error(`Error getting source entity for ${username}:`, err);
+          console.error(
+            `❌ Service ${serviceId}: Error getting source entity for ${username}:`,
+            err
+          );
           return null;
         }
       })
@@ -148,182 +486,94 @@ async function startForwardingService(service, client, geminiApiKey) {
     const validSourceEntities = sourceEntities.filter(
       (entity) => entity !== null
     );
+    const sourceChannelIds = validSourceEntities.map((entity) => entity.id);
+
     console.log(
-      `Valid source channels: ${validSourceEntities.length}`,
-      validSourceEntities.map((e) => ({ id: e.id, username: e.username }))
+      `📊 Service ${serviceId}: Valid source channels: ${validSourceEntities.length}`
     );
 
-    // Get target channel entities
-    const targetEntities = await Promise.all(
-      targetChannels.map(async (username) => {
-        try {
-          const formattedUsername = username.startsWith("@")
-            ? username
-            : `@${username}`;
-          const entity = await client.getEntity(formattedUsername);
-          console.log(
-            `Successfully connected to target channel: ${formattedUsername}`,
-            {
-              id: entity.id,
-              username: entity.username,
-              type: entity.className,
-            }
-          );
-          return entity;
-        } catch (err) {
-          console.error(`Error getting target entity for ${username}:`, err);
-          return null;
-        }
-      })
-    );
-
-    const validTargetEntities = targetEntities.filter(
-      (entity) => entity !== null
-    );
-    console.log(
-      `Valid target channels: ${validTargetEntities.length}`,
-      validTargetEntities.map((e) => ({ id: e.id, username: e.username }))
-    );
-
-    if (validTargetEntities.length === 0) {
-      throw new Error("No valid target channels found");
+    if (validSourceEntities.length === 0) {
+      throw new Error(`Service ${serviceId}: No valid source channels found`);
     }
 
-    // Send activation message to user
+    // Send activation message
     const activationTime = new Date().toLocaleString("fa-IR", {
       timeZone: "Asia/Tehran",
     });
     const activationMessage = `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`;
     await sendNotificationToUser(client, activationMessage);
 
-    // Create event handler for new messages
-    const eventHandler = async (event) => {
+    // Create enhanced event handler using Raw events
+    const eventHandler = async (update) => {
       try {
-        console.log("Received new message event", {
-          messageId: event.message?.id,
-          fromId: event.message?.fromId,
-          peerId: event.message?.peerId,
-        });
+        let message = null;
+        let isEdit = false;
 
-        const message = event.message;
-        if (!message) {
-          console.log("No message in event");
-          return;
+        // تشخیص نوع update
+        if (update.className === "UpdateNewChannelMessage" && update.message) {
+          message = update.message;
+          isEdit = false;
+        } else if (
+          update.className === "UpdateEditChannelMessage" &&
+          update.message
+        ) {
+          message = update.message;
+          isEdit = true;
+        } else if (update.className === "UpdateNewMessage" && update.message) {
+          message = update.message;
+          isEdit = false;
+        } else if (update.className === "UpdateEditMessage" && update.message) {
+          message = update.message;
+          isEdit = true;
         }
 
-        const channelId = message.peerId?.channelId;
-        console.log("Message channel ID:", channelId);
-
-        if (!channelId) {
-          console.log("Not a channel message");
-          return;
-        }
-
-        const sourceEntity = validSourceEntities.find((entity) => {
-          const sourceId = entity.id.value;
-          const msgChannelId = channelId.value;
-          const match = sourceId === msgChannelId;
-          console.log("Comparing channel IDs:", {
-            sourceId,
-            messageChannelId: msgChannelId,
-            matches: match,
-          });
-          return match;
-        });
-
-        if (!sourceEntity) {
-          console.log(
-            "Message not from source channel. Source channels:",
-            validSourceEntities.map((e) => ({ id: e.id, username: e.username }))
+        if (message) {
+          console.log(`📥 Service ${serviceId}: Received ${update.className}`);
+          await processMessage(
+            message,
+            isEdit,
+            sourceChannelIds,
+            service,
+            client,
+            genAI
           );
-          return;
-        }
-
-        console.log(
-          `Processing message from channel: ${sourceEntity.username}`
-        );
-
-        let text = message.message || "";
-        let media = message.media;
-
-        if (media && media.caption) {
-          text = media.caption;
-        }
-
-        if (useAI && genAI && text) {
-          try {
-            console.log("Processing text with AI");
-            const model = genAI.getGenerativeModel({
-              model: "gemini-2.0-flash",
-            });
-            const prompt = createPromptTemplate(text, promptTemplate);
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            text = response.text().trim();
-            console.log("AI processing successful");
-          } catch (err) {
-            console.error("AI processing error:", err);
-            console.log("Using original text due to AI error");
-          }
-        }
-
-        if (text && searchReplaceRules.length > 0) {
-          console.log("Applying search/replace rules");
-          for (const rule of searchReplaceRules) {
-            if (rule.search && rule.replace) {
-              text = text.replace(new RegExp(rule.search, "g"), rule.replace);
-            }
-          }
-        }
-
-        for (const targetEntity of validTargetEntities) {
-          try {
-            console.log(`Forwarding to channel: ${targetEntity.username}`);
-            if (media) {
-              await client.sendFile(targetEntity, {
-                file: media,
-                caption: text || undefined,
-                forceDocument: false,
-                parseMode: "html",
-              });
-              console.log("Media message forwarded successfully");
-            } else if (text) {
-              await client.sendMessage(targetEntity, {
-                message: text,
-                parseMode: "html",
-              });
-              console.log("Text message forwarded successfully");
-            }
-          } catch (err) {
-            console.error(`Error forwarding to ${targetEntity.username}:`, err);
-          }
         }
       } catch (err) {
-        console.error("Message handling error:", err);
+        console.error(`❌ Service ${serviceId}: Event handler error:`, err);
       }
     };
 
-    const sourceIds = validSourceEntities.map((entity) => entity.id);
-    console.log("Setting up event handler for source channels:", sourceIds);
-
+    // استفاده از Raw event handler برای دریافت همه انواع update ها
     client.addEventHandler(
       eventHandler,
-      new NewMessage({
-        chats: sourceIds,
-        incoming: true,
+      new Raw({
+        chats: sourceChannelIds,
       })
     );
 
-    console.log(`Service ${serviceId} started successfully`);
+    console.log(
+      `✅ Service ${serviceId}: Event handler registered for ${validSourceEntities.length} source channels`
+    );
 
+    // تنظیم تایمر پاک‌سازی
+    const cleanupInterval = setInterval(() => {
+      cleanExpiredMessages(serviceId);
+    }, 30 * 60 * 1000); // هر 30 دقیقه
+
+    // ذخیره event handler و cleanup interval
     if (!activeServices.has(service.user_id)) {
       activeServices.set(service.user_id, new Map());
     }
-    activeServices.get(service.user_id).set(serviceId, eventHandler);
+    activeServices.get(service.user_id).set(serviceId, {
+      eventHandler,
+      cleanupInterval,
+    });
 
-    console.log(`Service ${serviceId} started for user ${service.user_id}`);
+    console.log(
+      `🎉 Service ${serviceId} started successfully for user ${service.user_id}`
+    );
   } catch (err) {
-    console.error("Error starting forwarding service:", err);
+    console.error(`❌ Error starting service ${service.id}:`, err);
     throw err;
   }
 }
@@ -369,8 +619,18 @@ async function startUserServices(userId) {
         API_ID,
         API_HASH,
         {
-          connectionRetries: 5,
+          connectionRetries: 10,
+          retryDelay: 3000,
           useWSS: true,
+          timeout: 30000,
+          requestRetries: 5,
+          floodSleepThreshold: 60,
+          autoReconnect: true,
+          deviceModel: `TelegramForwarder_${userId}`,
+          systemVersion: "1.0.0",
+          appVersion: "1.0.0",
+          langCode: "en",
+          systemLangCode: "en",
         }
       );
 
@@ -380,13 +640,14 @@ async function startUserServices(userId) {
       }
 
       activeClients.set(userId, client);
+      console.log(`🔗 Client connected for user ${userId}`);
     }
 
     for (const service of services) {
       await startForwardingService(service, client, user.gemini_api_key);
     }
 
-    console.log(`Started ${services.length} services for user:`, userId);
+    console.log(`🎊 Started ${services.length} services for user: ${userId}`);
   } catch (err) {
     console.error("Error starting user services:", err);
     throw err;
@@ -398,12 +659,26 @@ async function stopService(userId, serviceId) {
   try {
     const userServices = activeServices.get(userId);
     if (userServices) {
-      const eventHandler = userServices.get(serviceId);
-      if (eventHandler) {
+      const serviceData = userServices.get(serviceId);
+      if (serviceData) {
         const client = activeClients.get(userId);
         if (client) {
-          client.removeEventHandler(eventHandler);
+          client.removeEventHandler(serviceData.eventHandler);
         }
+
+        // پاک کردن cleanup interval
+        if (serviceData.cleanupInterval) {
+          clearInterval(serviceData.cleanupInterval);
+        }
+
+        // ذخیره نهایی message mapping
+        const messageMap = messageMaps.get(serviceId);
+        if (messageMap) {
+          cleanExpiredMessages(serviceId);
+          saveMessageMap(serviceId, messageMap);
+          messageMaps.delete(serviceId);
+        }
+
         userServices.delete(serviceId);
 
         if (userServices.size === 0) {
@@ -427,8 +702,20 @@ async function stopUserServices(userId) {
     if (userServices) {
       const client = activeClients.get(userId);
       if (client) {
-        for (const eventHandler of userServices.values()) {
-          client.removeEventHandler(eventHandler);
+        for (const [serviceId, serviceData] of userServices.entries()) {
+          client.removeEventHandler(serviceData.eventHandler);
+
+          if (serviceData.cleanupInterval) {
+            clearInterval(serviceData.cleanupInterval);
+          }
+
+          // ذخیره message mapping
+          const messageMap = messageMaps.get(serviceId);
+          if (messageMap) {
+            cleanExpiredMessages(serviceId);
+            saveMessageMap(serviceId, messageMap);
+            messageMaps.delete(serviceId);
+          }
         }
         await client.disconnect();
       }
@@ -445,7 +732,6 @@ async function initializeAllServices() {
   try {
     const db = await openDb();
 
-    // Get all users with active services
     const users = await db.all(`
       SELECT DISTINCT u.id
       FROM users u
@@ -453,20 +739,23 @@ async function initializeAllServices() {
       WHERE fs.is_active = 1
     `);
 
-    console.log(`Found ${users.length} users with active services`);
+    console.log(`🔍 Found ${users.length} users with active services`);
 
-    // Start services for each user
     for (const user of users) {
-      await startUserServices(user.id);
+      try {
+        await startUserServices(user.id);
+      } catch (err) {
+        console.error(`❌ Failed to start services for user ${user.id}:`, err);
+      }
     }
 
-    console.log("All active services initialized successfully");
+    console.log("🎉 All active services initialization completed");
   } catch (err) {
-    console.error("Error initializing services:", err);
+    console.error("❌ Error initializing services:", err);
   }
 }
 
-// API Routes
+// API Routes (unchanged)
 app.post("/sendCode", async (req, res) => {
   try {
     console.log("sendCode request received:", req.body);
@@ -476,7 +765,20 @@ app.post("/sendCode", async (req, res) => {
       return res.status(400).json({ error: "Phone number is required" });
     }
 
-    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH);
+    const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
+      connectionRetries: 10,
+      retryDelay: 3000,
+      useWSS: true,
+      timeout: 30000,
+      requestRetries: 5,
+      floodSleepThreshold: 60,
+      autoReconnect: true,
+      deviceModel: `TelegramForwarder_${userId}`,
+      systemVersion: "1.0.0",
+      appVersion: "1.0.0",
+      langCode: "en",
+      systemLangCode: "en",
+    });
 
     await client.connect();
 
@@ -625,7 +927,55 @@ app.get("/health", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
+    activeClients: activeClients.size,
+    activeServices: Array.from(activeServices.values()).reduce(
+      (total, userServices) => total + userServices.size,
+      0
+    ),
   });
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\n💾 در حال ذخیره داده‌ها و بستن اتصالات...");
+
+  // ذخیره همه message mappings
+  for (const [serviceId, messageMap] of messageMaps.entries()) {
+    cleanExpiredMessages(serviceId);
+    saveMessageMap(serviceId, messageMap);
+  }
+
+  // بستن همه اتصالات
+  for (const client of activeClients.values()) {
+    try {
+      await client.disconnect();
+    } catch (err) {
+      console.error("Error disconnecting client:", err);
+    }
+  }
+
+  console.log("✅ داده‌ها ذخیره شد. خروج...");
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("\n💾 در حال ذخیره داده‌ها و بستن اتصالات...");
+
+  for (const [serviceId, messageMap] of messageMaps.entries()) {
+    cleanExpiredMessages(serviceId);
+    saveMessageMap(serviceId, messageMap);
+  }
+
+  for (const client of activeClients.values()) {
+    try {
+      await client.disconnect();
+    } catch (err) {
+      console.error("Error disconnecting client:", err);
+    }
+  }
+
+  console.log("✅ داده‌ها ذخیره شد. خروج...");
+  process.exit(0);
 });
 
 // Initialize all services on server start
