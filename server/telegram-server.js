@@ -180,20 +180,6 @@ async function processMessage(
 ) {
   try {
     const serviceId = service.id;
-    const messageMap2 = messageMaps.get(serviceId) || new Map();
-    if (!messageMaps.has(serviceId)) {
-      messageMaps.set(serviceId, messageMap2);
-    }
-
-    const channelId2 = message.peerId?.channelId || message.chatId;
-    const messageKey2 = `${channelId2}_${message.id}`;
-
-    if (!isEdit && messageMap.has(messageKey2)) {
-      console.log(
-        `⛔ Service ${serviceId}: پیام تکراری (${messageKey2}) — قبلاً پردازش شده`
-      );
-      return;
-    }
     const targetChannels = JSON.parse(service.target_channels);
     const searchReplaceRules = JSON.parse(service.search_replace_rules);
     const useAI = Boolean(service.prompt_template);
@@ -557,73 +543,27 @@ async function startForwardingService(service, client, geminiApiKey) {
       }
     };
 
-    const userEntities = validSourceEntities.filter(
-      (e) => e.className === "User"
-    );
-    const channelEntities = validSourceEntities.filter(
-      (e) => e.className !== "User"
-    );
-
-    const userIds = userEntities.map((e) => e.id.toString());
-    const channelIds = channelEntities.map((e) => e.id);
-
-    if (channelIds.length > 0) {
-      client.addEventHandler(async (update) => {
-        try {
-          let message = null;
-          let isEdit = false;
-
-          if (
-            update.className === "UpdateNewChannelMessage" &&
-            update.message
-          ) {
-            message = update.message;
-            isEdit = false;
-          } else if (
-            update.className === "UpdateEditChannelMessage" &&
-            update.message
-          ) {
-            message = update.message;
-            isEdit = true;
-          }
-
-          if (message) {
-            console.log(`📥 Service ${serviceId}: دریافت پیام جدید از کانال`);
-            await processMessage(
-              message,
-              isEdit,
-              channelIds, // فقط کانال‌ها
-              service,
-              client,
-              genAI
-            );
-          }
-        } catch (err) {
-          console.error(
-            `❌ Service ${serviceId}: خطا در Raw channel handler:`,
-            err
-          );
-        }
-      }, new Raw({ chats: channelIds }));
-
-      console.log(
-        `✅ Service ${serviceId}: Event handler مخصوص کانال‌ها ثبت شد`
-      );
-    }
+    // استفاده از Raw event handler برای دریافت همه انواع update ها
 
     // اگر یکی از sourceChannel ها از نوع User باشد، رویدادهای incoming را نیز گوش بده
-    if (userIds.length > 0) {
+    const hasUserSource = validSourceEntities.some(
+      (entity) => entity.className === "User"
+    );
+
+    if (hasUserSource) {
       client.addEventHandler(async (event) => {
         try {
           const message = event.message;
           if (!message || !message.peerId) return;
 
+          // فقط پیام‌های دریافتی از کاربران
           const sender = await message.getSender();
           if (!sender || sender.className !== "User") return;
 
           const senderId = sender.id?.toString();
+          const sourceUserIds = sourceChannelIds.map((id) => id.toString());
 
-          if (!userIds.includes(senderId)) {
+          if (!sourceUserIds.includes(senderId)) {
             console.log(
               `⛔ پیام از کاربری دریافت شد (${senderId}) که جزو منابع نیست`
             );
@@ -631,29 +571,36 @@ async function startForwardingService(service, client, geminiApiKey) {
           }
 
           console.log(
-            `📥 Service ${serviceId}: پیام جدید از کاربر ${
+            `📥 Service ${serviceId}: پیام جدید از user ${
               sender.username || senderId
             }`
           );
 
           await processMessage(
             message,
-            false,
-            userIds, // فقط userها
+            false, // isEdit = false
+            sourceChannelIds,
             service,
             client,
             genAI
           );
         } catch (err) {
           console.error(
-            `❌ Service ${serviceId}: خطا در NewMessage user handler:`,
+            `❌ Service ${serviceId}: خطا در دریافت پیام کاربر:`,
             err
           );
         }
       }, new NewMessage({ incoming: true }));
 
       console.log(
-        `✅ Service ${serviceId}: Event handler مخصوص کاربران ثبت شد`
+        `✅ Service ${serviceId}: Event handler مخصوص پیام‌های کاربران ثبت شد`
+      );
+    } else {
+      client.addEventHandler(
+        eventHandler,
+        new Raw({
+          chats: sourceChannelIds,
+        })
       );
     }
 
