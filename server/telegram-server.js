@@ -547,6 +547,7 @@ async function startForwardingService(service, client, geminiApiKey) {
     const hasUserSource = validSourceEntities.some(
       (entity) => entity.className === "User"
     );
+    console.log("hasUserSource", hasUserSource);
 
     if (hasUserSource) {
       client.addEventHandler(async (event) => {
