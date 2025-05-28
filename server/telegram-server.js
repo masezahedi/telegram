@@ -543,6 +543,8 @@ async function startForwardingService(service, client, geminiApiKey) {
       }
     };
 
+    client.addEventHandler(eventHandler, new Raw({ chats: sourceChannelIds }));
+
     // اگر یکی از sourceChannel ها از نوع User باشد، رویدادهای incoming را نیز گوش بده
     const hasUserSource = validSourceEntities.some(
       (entity) => entity.className === "User"
