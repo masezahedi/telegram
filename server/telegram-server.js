@@ -75,7 +75,7 @@ async function verifyToken(token) {
 // Active clients and services store
 const activeClients = new Map();
 const activeServices = new Map();
-const messageMaps = new Map();
+const messageMaps = new Map(); // برای نگهداری message mapping هر سرویس
 
 // مدت زمان نگهداری پیام‌ها (2 ساعت)
 const MESSAGE_EXPIRY_TIME = 2 * 60 * 60 * 1000;
@@ -169,33 +169,6 @@ async function sendNotificationToUser(client, message) {
   }
 }
 
-// تابع بهبود یافته برای تشخیص منبع پیام
-async function isMessageFromSource(message, sourceChannelIds, client) {
-  try {
-    // اگر منبع شامل @ باشد (یوزرنیم کاربر)
-    if (sourceChannelIds.some((id) => id.startsWith("@"))) {
-      const sender = await message.getSender();
-      if (!sender) return false;
-
-      const senderUsername = sender.username ? `@${sender.username}` : null;
-      const senderId = `user${sender.id}`;
-
-      return sourceChannelIds.some((sourceId) => {
-        // مقایسه با یوزرنیم (مثل @username) یا آیدی (مثل user123456)
-        return sourceId === senderUsername || sourceId === senderId;
-      });
-    }
-    // اگر منبع کانال/گروه باشد (آیدی عددی)
-    else {
-      const chatId = message.peerId?.channelId || message.chatId;
-      return chatId && sourceChannelIds.includes(chatId.toString());
-    }
-  } catch (err) {
-    console.error("Error checking message source:", err);
-    return false;
-  }
-}
-
 // تابع پردازش پیام با منطق بهبود یافته
 async function processMessage(
   message,
@@ -223,15 +196,20 @@ async function processMessage(
       return;
     }
 
-    // بررسی اینکه پیام از منبع مورد نظر باشد
-    const isFromSource = await isMessageFromSource(
-      message,
-      sourceChannelIds,
-      client
-    );
-    if (!isFromSource) {
+    // بررسی اینکه پیام از کانال مبدا باشد
+    const channelId = message.peerId?.channelId || message.chatId;
+    let isFromSourceChannel = false;
+
+    for (const sourceId of sourceChannelIds) {
+      if (channelId && channelId.toString() === sourceId.toString()) {
+        isFromSourceChannel = true;
+        break;
+      }
+    }
+
+    if (!isFromSourceChannel) {
       console.log(
-        `⛔ Service ${serviceId}: پیام از منبع غیرمورد نظر نادیده گرفته شد`
+        `⛔ Service ${serviceId}: پیام از کانال غیرمبدا نادیده گرفته شد`
       );
       return;
     }
@@ -257,9 +235,7 @@ async function processMessage(
       messageMaps.set(serviceId, messageMap);
     }
 
-    const messageKey = `${
-      message.peerId?.userId || message.peerId?.channelId || message.chatId
-    }_${message.id}`;
+    const messageKey = `${channelId}_${message.id}`;
     const currentTime = Date.now();
 
     if (originalText) {
@@ -480,6 +456,46 @@ async function startForwardingService(service, client, geminiApiKey) {
       console.log(`🤖 Service ${serviceId}: Initialized Gemini AI`);
     }
 
+    // Get source channel entities
+    const sourceEntities = await Promise.all(
+      sourceChannels.map(async (username) => {
+        try {
+          const formattedUsername = username.startsWith("@")
+            ? username
+            : `@${username}`;
+          const entity = await client.getEntity(formattedUsername);
+          console.log(
+            `✅ Service ${serviceId}: Connected to source channel: ${formattedUsername}`,
+            {
+              id: entity.id,
+              username: entity.username,
+              type: entity.className,
+            }
+          );
+          return entity;
+        } catch (err) {
+          console.error(
+            `❌ Service ${serviceId}: Error getting source entity for ${username}:`,
+            err
+          );
+          return null;
+        }
+      })
+    );
+
+    const validSourceEntities = sourceEntities.filter(
+      (entity) => entity !== null
+    );
+    const sourceChannelIds = validSourceEntities.map((entity) => entity.id);
+
+    console.log(
+      `📊 Service ${serviceId}: Valid source channels: ${validSourceEntities.length}`
+    );
+
+    if (validSourceEntities.length === 0) {
+      throw new Error(`Service ${serviceId}: No valid source channels found`);
+    }
+
     // Send activation message
     const activationTime = new Date().toLocaleString("fa-IR", {
       timeZone: "Asia/Tehran",
@@ -487,14 +503,13 @@ async function startForwardingService(service, client, geminiApiKey) {
     const activationMessage = `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`;
     await sendNotificationToUser(client, activationMessage);
 
-    // Create enhanced event handler
+    // Create enhanced event handler using Raw events
     const eventHandler = async (update) => {
       try {
-        console.log(`📥 Received update type: ${update.className}`);
-
         let message = null;
         let isEdit = false;
 
+        // تشخیص نوع update
         if (update.className === "UpdateNewChannelMessage" && update.message) {
           message = update.message;
           isEdit = false;
@@ -513,10 +528,11 @@ async function startForwardingService(service, client, geminiApiKey) {
         }
 
         if (message) {
+          console.log(`📥 Service ${serviceId}: Received ${update.className}`);
           await processMessage(
             message,
             isEdit,
-            sourceChannels,
+            sourceChannelIds,
             service,
             client,
             genAI
@@ -528,9 +544,16 @@ async function startForwardingService(service, client, geminiApiKey) {
     };
 
     // استفاده از Raw event handler برای دریافت همه انواع update ها
-    client.addEventHandler(eventHandler, new Raw({}));
+    client.addEventHandler(
+      eventHandler,
+      new Raw({
+        chats: sourceChannelIds,
+      })
+    );
 
-    console.log(`✅ Service ${serviceId}: Event handler registered`);
+    console.log(
+      `✅ Service ${serviceId}: Event handler registered for ${validSourceEntities.length} source channels`
+    );
 
     // تنظیم تایمر پاک‌سازی
     const cleanupInterval = setInterval(() => {
@@ -572,17 +595,21 @@ async function startUserServices(userId) {
         if (serviceData.cleanupInterval) {
           clearInterval(serviceData.cleanupInterval);
         }
+        // پاک کردن message map مربوط به این سرویس از حافظه اصلی اگر لازم است
+        // messageMaps.delete(serviceId); // اگر می‌خواهید message map هم با هر بار ریستارت پاک شود
       }
-      userActiveServices.clear();
+      userActiveServices.clear(); // یا activeServices.delete(userId) اگر ساختار Map بیرونی را هم پاک می‌کنید
     }
 
     const db = await openDb();
 
     const user = await db.get(
-      `SELECT u.telegram_session, us.gemini_api_key
-       FROM users u
-       LEFT JOIN user_settings us ON u.id = us.user_id
-       WHERE u.id = ?`,
+      `
+      SELECT u.telegram_session, us.gemini_api_key
+      FROM users u
+      LEFT JOIN user_settings us ON u.id = us.user_id
+      WHERE u.id = ?
+    `,
       [userId]
     );
 
@@ -592,9 +619,11 @@ async function startUserServices(userId) {
     }
 
     const services = await db.all(
-      `SELECT *
-       FROM forwarding_services
-       WHERE user_id = ? AND is_active = 1`,
+      `
+      SELECT *
+      FROM forwarding_services
+      WHERE user_id = ? AND is_active = 1
+    `,
       [userId]
     );
 
@@ -656,10 +685,12 @@ async function stopService(userId, serviceId) {
           client.removeEventHandler(serviceData.eventHandler);
         }
 
+        // پاک کردن cleanup interval
         if (serviceData.cleanupInterval) {
           clearInterval(serviceData.cleanupInterval);
         }
 
+        // ذخیره نهایی message mapping
         const messageMap = messageMaps.get(serviceId);
         if (messageMap) {
           cleanExpiredMessages(serviceId);
@@ -697,6 +728,7 @@ async function stopUserServices(userId) {
             clearInterval(serviceData.cleanupInterval);
           }
 
+          // ذخیره message mapping
           const messageMap = messageMaps.get(serviceId);
           if (messageMap) {
             cleanExpiredMessages(serviceId);
@@ -742,7 +774,7 @@ async function initializeAllServices() {
   }
 }
 
-// API Routes
+// API Routes (unchanged)
 app.post("/sendCode", async (req, res) => {
   try {
     console.log("sendCode request received:", req.body);
@@ -925,11 +957,13 @@ app.get("/health", (req, res) => {
 process.on("SIGINT", async () => {
   console.log("\n💾 در حال ذخیره داده‌ها و بستن اتصالات...");
 
+  // ذخیره همه message mappings
   for (const [serviceId, messageMap] of messageMaps.entries()) {
     cleanExpiredMessages(serviceId);
     saveMessageMap(serviceId, messageMap);
   }
 
+  // بستن همه اتصالات
   for (const client of activeClients.values()) {
     try {
       await client.disconnect();
