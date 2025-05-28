@@ -553,6 +553,8 @@ async function startForwardingService(service, client, geminiApiKey) {
       client.addEventHandler(async (event) => {
         try {
           const message = event.message;
+          console.log("message", message);
+
           if (!message || !message.peerId) return;
 
           // فقط پیام‌های دریافتی از کاربران
