@@ -13,6 +13,7 @@ const {
   saveMessageMap,
   cleanExpiredMessages,
 } = require("./services/telegram/message-maps");
+const { API_ID, API_HASH } = require("./config");
 
 const app = express();
 

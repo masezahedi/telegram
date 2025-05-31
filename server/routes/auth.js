@@ -1,8 +1,7 @@
 const express = require("express");
 const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const API_ID = 24554364;
-const API_HASH = "5db6997246b3bc3b6a8ac6097b1ef937";
+const { API_ID, API_HASH } = require("../config");
 const { activeClients } = require("../services/telegram");
 
 const router = express.Router();
