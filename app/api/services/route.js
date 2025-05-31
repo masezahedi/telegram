@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
 // اضافه کردن import برای کنترل سرویس‌ها
-import { stopService, startUserServices } from "@/lib/telegram/service-manager";
+import {
+  stopService,
+  startUserServices,
+} from "@/services/services/telegram/service-manager";
 
 export const dynamic = "force-dynamic";
 
