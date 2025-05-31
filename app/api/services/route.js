@@ -5,7 +5,7 @@ import { openDb } from "@/lib/db";
 import {
   stopService,
   startUserServices,
-} from "@/services/services/telegram/service-manager";
+} from "@/server/services/telegram/service-manager";
 
 export const dynamic = "force-dynamic";
 
