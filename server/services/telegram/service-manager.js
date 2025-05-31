@@ -1,7 +1,11 @@
 const { Raw, NewMessage } = require("telegram/events");
 const { getOrCreateClient } = require("./client");
 const { processMessage, sendNotificationToUser } = require("./message-handler");
-const { loadMessageMap, messageMaps, cleanExpiredMessages } = require("./message-maps");
+const {
+  loadMessageMap,
+  messageMaps,
+  cleanExpiredMessages,
+} = require("./message-maps");
 const { openDb } = require("../../utils/db");
 
 // Store active services
@@ -11,9 +15,15 @@ async function startForwardingService(service, client, geminiApiKey) {
   try {
     const serviceId = service.id;
     const sourceChannels = JSON.parse(service.source_channels);
+    const targetChannels = JSON.parse(service.target_channels);
     const useAI = Boolean(service.prompt_template);
+    const isCopyService = service.type === "copy";
+    const copyHistory = Boolean(service.copy_history);
+    const historyLimit = service.history_limit || 100;
 
-    console.log(`🚀 Starting service ${serviceId}`);
+    console.log(
+      `🚀 Starting service ${serviceId} (${isCopyService ? "Copy" : "Forward"})`
+    );
 
     // Load message mapping
     const messageMap = loadMessageMap(serviceId);
@@ -27,11 +37,13 @@ async function startForwardingService(service, client, geminiApiKey) {
       console.log(`🤖 Service ${serviceId}: Initialized Gemini AI`);
     }
 
-    // Get source channel entities
+    // Get source and target entities
     const sourceEntities = await Promise.all(
       sourceChannels.map(async (username) => {
         try {
-          const formattedUsername = username.startsWith("@") ? username : `@${username}`;
+          const formattedUsername = username.startsWith("@")
+            ? username
+            : `@${username}`;
           const entity = await client.getEntity(formattedUsername);
           return entity;
         } catch (err) {
@@ -41,16 +53,75 @@ async function startForwardingService(service, client, geminiApiKey) {
       })
     );
 
-    const validSourceEntities = sourceEntities.filter(entity => entity !== null);
-    const sourceChannelIds = validSourceEntities.map(entity => entity.id);
+    const targetEntities = await Promise.all(
+      targetChannels.map(async (username) => {
+        try {
+          const formattedUsername = username.startsWith("@")
+            ? username
+            : `@${username}`;
+          const entity = await client.getEntity(formattedUsername);
+          return entity;
+        } catch (err) {
+          console.error(`❌ Error getting target entity for ${username}:`, err);
+          return null;
+        }
+      })
+    );
 
-    if (validSourceEntities.length === 0) {
-      throw new Error(`Service ${serviceId}: No valid source channels found`);
+    const validSourceEntities = sourceEntities.filter(
+      (entity) => entity !== null
+    );
+    const validTargetEntities = targetEntities.filter(
+      (entity) => entity !== null
+    );
+
+    if (validSourceEntities.length === 0 || validTargetEntities.length === 0) {
+      throw new Error(
+        `Service ${serviceId}: Invalid source or target channels`
+      );
     }
 
     // Send activation message
-    const activationTime = new Date().toLocaleString("fa-IR", { timeZone: "Asia/Tehran" });
-    await sendNotificationToUser(client, `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`);
+    const activationTime = new Date().toLocaleString("fa-IR", {
+      timeZone: "Asia/Tehran",
+    });
+    await sendNotificationToUser(
+      client,
+      `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
+    );
+
+    // Handle copy history if needed
+    if (isCopyService && copyHistory) {
+      console.log(
+        `📚 Service ${serviceId}: Starting history copy (${historyLimit} messages)`
+      );
+      try {
+        const sourceChannel = validSourceEntities[0];
+        const targetChannel = validTargetEntities[0];
+
+        const messages = await client.getMessages(sourceChannel, {
+          limit: historyLimit,
+          reverse: true,
+        });
+
+        for (const message of messages) {
+          await processMessage(
+            message,
+            false,
+            [sourceChannel.id],
+            service,
+            client,
+            genAI
+          );
+          // Add small delay to avoid flooding
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+
+        console.log(`✅ Service ${serviceId}: History copy completed`);
+      } catch (err) {
+        console.error(`❌ Service ${serviceId}: History copy error:`, err);
+      }
+    }
 
     // Create event handler
     const eventHandler = async (update) => {
@@ -60,7 +131,10 @@ async function startForwardingService(service, client, geminiApiKey) {
 
         if (update.className === "UpdateNewChannelMessage" && update.message) {
           message = update.message;
-        } else if (update.className === "UpdateEditChannelMessage" && update.message) {
+        } else if (
+          update.className === "UpdateEditChannelMessage" &&
+          update.message
+        ) {
           message = update.message;
           isEdit = true;
         } else if (update.className === "UpdateNewMessage" && update.message) {
@@ -71,7 +145,15 @@ async function startForwardingService(service, client, geminiApiKey) {
         }
 
         if (message) {
-          await processMessage(message, isEdit, sourceChannelIds, service, client, genAI);
+          const sourceIds = validSourceEntities.map((entity) => entity.id);
+          await processMessage(
+            message,
+            isEdit,
+            sourceIds,
+            service,
+            client,
+            genAI
+          );
         }
       } catch (err) {
         console.error(`❌ Service ${serviceId}: Event handler error:`, err);
@@ -79,30 +161,8 @@ async function startForwardingService(service, client, geminiApiKey) {
     };
 
     // Set up event handlers
-    const hasUserSource = validSourceEntities.some(entity => entity.className === "User");
-
-    if (hasUserSource) {
-      client.addEventHandler(async (event) => {
-        try {
-          const message = event.message;
-          if (!message || !message.peerId) return;
-
-          const sender = await message.getSender();
-          if (!sender || sender.className !== "User") return;
-
-          const senderId = sender.id?.toString();
-          const sourceUserIds = sourceChannelIds.map(id => id.toString());
-
-          if (!sourceUserIds.includes(senderId)) return;
-
-          await processMessage(message, false, sourceChannelIds, service, client, genAI);
-        } catch (err) {
-          console.error(`❌ Service ${serviceId}: User message handler error:`, err);
-        }
-      }, new NewMessage({ incoming: true }));
-    } else {
-      client.addEventHandler(eventHandler, new Raw({ chats: sourceChannelIds }));
-    }
+    const sourceIds = validSourceEntities.map((entity) => entity.id);
+    client.addEventHandler(eventHandler, new Raw({ chats: sourceIds }));
 
     // Set up cleanup interval
     const cleanupInterval = setInterval(() => {
@@ -115,7 +175,7 @@ async function startForwardingService(service, client, geminiApiKey) {
     }
     activeServices.get(service.user_id).set(serviceId, {
       eventHandler,
-      cleanupInterval
+      cleanupInterval,
     });
 
     console.log(`✅ Service ${serviceId} started for user ${service.user_id}`);
@@ -128,13 +188,16 @@ async function startForwardingService(service, client, geminiApiKey) {
 async function startUserServices(userId) {
   try {
     const db = await openDb();
-    
-    const user = await db.get(`
+
+    const user = await db.get(
+      `
       SELECT u.telegram_session, us.gemini_api_key
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
       WHERE u.id = ?
-    `, [userId]);
+    `,
+      [userId]
+    );
 
     if (!user?.telegram_session) {
       console.log("No Telegram session found for user:", userId);
@@ -209,7 +272,7 @@ async function stopUserServices(userId) {
 async function initializeAllServices() {
   try {
     const db = await openDb();
-    
+
     const users = await db.all(`
       SELECT DISTINCT u.id
       FROM users u
@@ -239,5 +302,5 @@ module.exports = {
   startUserServices,
   stopService,
   stopUserServices,
-  initializeAllServices
+  initializeAllServices,
 };
