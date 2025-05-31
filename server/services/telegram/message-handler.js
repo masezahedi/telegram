@@ -1,3 +1,4 @@
+// Fixed message-handler.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { messageMaps } = require("./message-maps");
 const { cleanExpiredMessages, saveMessageMap } = require("./message-maps");
@@ -62,13 +63,36 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
       return;
     }
 
-    const channelId = message.peerId?.channelId || message.chatId;
-    const isFromSourceChannel = sourceChannelIds.some(id => 
-      channelId && channelId.toString() === id.toString()
-    );
+    // بهتر شده: دقیق‌تر channel ID رو استخراج کن
+    let channelId = null;
+    if (message.peerId?.channelId) {
+      channelId = message.peerId.channelId;
+    } else if (message.chatId) {
+      channelId = message.chatId;
+    } else if (message.chat?.id) {
+      channelId = message.chat.id;
+    }
+
+    if (!channelId) {
+      console.log(`⛔ Service ${serviceId}: No channel ID found`);
+      return;
+    }
+
+    // بهتر شده: دقیق‌تر بررسی کن که از source channel هست یا نه
+    const isFromSourceChannel = sourceChannelIds.some(sourceId => {
+      // Handle different ID types (BigInt, Number, String)
+      const sourceIdStr = sourceId?.toString?.() || String(sourceId);
+      const channelIdStr = channelId?.toString?.() || String(channelId);
+      
+      // Try multiple comparison methods
+      return sourceIdStr === channelIdStr || 
+             sourceId?.value?.toString() === channelId?.value?.toString() ||
+             Math.abs(sourceId) === Math.abs(channelId);
+    });
 
     if (!isFromSourceChannel) {
       console.log(`⛔ Service ${serviceId}: Message from non-source channel ignored`);
+      console.log(`Channel ID: ${channelId}, Source IDs: ${sourceChannelIds.map(id => id.toString())}`);
       return;
     }
 
@@ -82,27 +106,33 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
       return;
     }
 
-    // Handle message mapping
+    // Handle message mapping - بهتر شده
     const messageMap = messageMaps.get(serviceId) || new Map();
     if (!messageMaps.has(serviceId)) {
       messageMaps.set(serviceId, messageMap);
     }
 
-    const messageKey = `${channelId}_${message.id}`;
+    // بهتر شده: دقیق‌تر message key بساز
+    const messageKey = `${channelId.toString()}_${message.id}`;
     const currentTime = Date.now();
+
+    console.log(`📝 Processing message: ${messageKey}, isEdit: ${isEdit}`);
 
     let processedText = originalText;
 
     // Process with AI if enabled
     if (originalText && useAI && genAI) {
       try {
+        console.log(`🤖 Service ${serviceId}: Processing with AI`);
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
         const prompt = createPromptTemplate(originalText, promptTemplate);
         const result = await model.generateContent(prompt);
         const response = await result.response;
         processedText = response.text().trim();
+        console.log(`🤖 Service ${serviceId}: AI processing completed`);
       } catch (err) {
         console.error(`❌ Service ${serviceId}: AI Error:`, err);
+        processedText = originalText; // Fallback to original text
       }
     }
 
@@ -127,21 +157,35 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
         const targetEntity = await client.getEntity(formattedUsername);
 
         if (isEdit && messageMap.has(messageKey)) {
+          // ادیت کردن پیام موجود
           const existingMessage = messageMap.get(messageKey);
+          console.log(`🔄 Service ${serviceId}: Editing existing message for ${targetUsername}`);
+          console.log(`Existing message data:`, existingMessage);
+
+          // بهتر شده: دقیق‌تر target message ID رو پیدا کن
           const targetMessageId = existingMessage.targetMessageIds?.[targetUsername];
 
           if (targetMessageId) {
             try {
+              console.log(`✏️ Service ${serviceId}: Attempting to edit message ${targetMessageId} in ${targetUsername}`);
+              
               await client.editMessage(targetEntity, {
                 message: parseInt(targetMessageId),
                 text: processedText,
+                parseMode: "html",
               });
-              messageMap.set(messageKey, {
-                ...existingMessage,
-                timestamp: currentTime,
-              });
+
+              console.log(`✅ Service ${serviceId}: Message edited successfully in ${targetUsername}`);
+
+              // Update timestamp
+              existingMessage.timestamp = currentTime;
+              messageMap.set(messageKey, existingMessage);
+              
             } catch (editError) {
               console.error(`❌ Edit error in ${targetUsername}:`, editError.message);
+              
+              // اگر ادیت نشد، پیام جدید بفرست
+              console.log(`🔄 Service ${serviceId}: Sending new message instead of editing`);
               const sentMessage = await sendNewMessage(
                 message,
                 processedText,
@@ -149,17 +193,42 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
                 hasMedia,
                 client
               );
+              
               if (sentMessage) {
-                existingMessage.targetMessageIds = {
-                  ...existingMessage.targetMessageIds,
-                  [targetUsername]: sentMessage.id.toString()
-                };
+                // بهتر شده: درست update کن
+                if (!existingMessage.targetMessageIds) {
+                  existingMessage.targetMessageIds = {};
+                }
+                existingMessage.targetMessageIds[targetUsername] = sentMessage.id.toString();
                 existingMessage.timestamp = currentTime;
                 messageMap.set(messageKey, existingMessage);
+                console.log(`📝 Service ${serviceId}: Updated message mapping for ${targetUsername}`);
               }
+            }
+          } else {
+            console.log(`⚠️ Service ${serviceId}: No target message ID found for ${targetUsername}, sending new message`);
+            // اگر target message ID نداریم، پیام جدید بفرست
+            const sentMessage = await sendNewMessage(
+              message,
+              processedText,
+              targetEntity,
+              hasMedia,
+              client
+            );
+            
+            if (sentMessage) {
+              // بهتر شده: اگر existingMessage وجود داره ولی targetMessageIds نداره
+              if (!existingMessage.targetMessageIds) {
+                existingMessage.targetMessageIds = {};
+              }
+              existingMessage.targetMessageIds[targetUsername] = sentMessage.id.toString();
+              existingMessage.timestamp = currentTime;
+              messageMap.set(messageKey, existingMessage);
             }
           }
         } else {
+          // پیام جدید بفرست
+          console.log(`📤 Service ${serviceId}: Sending new message to ${targetUsername}`);
           const sentMessage = await sendNewMessage(
             message,
             processedText,
@@ -167,13 +236,20 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
             hasMedia,
             client
           );
+          
           if (sentMessage) {
-            messageMap.set(messageKey, {
+            // بهتر شده: درست message mapping رو ذخیره کن
+            const messageData = {
               targetMessageIds: {
                 [targetUsername]: sentMessage.id.toString()
               },
-              timestamp: currentTime
-            });
+              timestamp: currentTime,
+              originalChannelId: channelId.toString(),
+              originalMessageId: message.id
+            };
+            
+            messageMap.set(messageKey, messageData);
+            console.log(`📝 Service ${serviceId}: Saved message mapping: ${messageKey} -> ${sentMessage.id}`);
           }
         }
       } catch (err) {
@@ -181,7 +257,10 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
       }
     }
 
+    // ذخیره message map
     saveMessageMap(serviceId, messageMap);
+    console.log(`💾 Service ${serviceId}: Message map saved`);
+
   } catch (err) {
     console.error(`❌ Service ${service.id}: Message processing error:`, err);
   }
