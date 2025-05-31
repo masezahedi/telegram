@@ -2,10 +2,12 @@ const { Raw, NewMessage } = require("telegram/events");
 const { getOrCreateClient } = require("./client");
 const { processMessage, sendNotificationToUser } = require("./message-handler");
 const {
-  loadMessageMap,
   messageMaps,
+  loadMessageMap,
+  saveMessageMap,
   cleanExpiredMessages,
 } = require("./message-maps");
+
 const { openDb } = require("../../utils/db");
 
 // Store active services
