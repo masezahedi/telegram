@@ -692,17 +692,19 @@ async function startUserServices(userId) {
         API_ID,
         API_HASH,
         {
-          connectionRetries: 10,
-          retryDelay: 3000,
+          connectionRetries: 20,
+          retryDelay: 5000,
           useWSS: true,
-          timeout: 30000,
-          requestRetries: 5,
-          floodSleepThreshold: 60,
+          timeout: 60000,
+          requestRetries: 10,
+          floodSleepThreshold: 120,
           autoReconnect: true,
           systemVersion: "1.0.0",
           appVersion: "1.0.0",
           langCode: "en",
           systemLangCode: "en",
+          baseLogger: "none",
+          updatesPendingMax: 20,
         }
       );
 
@@ -852,6 +854,26 @@ app.post("/sendCode", async (req, res) => {
     });
 
     await client.connect();
+
+    client.addEventHandler(async (error) => {
+      console.error(`❌ Client error for user ${userId}:`, error);
+      if (
+        error.message.includes("TIMEOUT") ||
+        error.message.includes("CONNECTION")
+      ) {
+        console.log(`🔄 Attempting to reconnect client for user ${userId}`);
+        try {
+          await client.disconnect();
+          await new Promise((resolve) => setTimeout(resolve, 5000)); // صبر 5 ثانیه
+          await client.connect();
+        } catch (reconnectError) {
+          console.error(
+            `❌ Reconnection failed for user ${userId}:`,
+            reconnectError
+          );
+        }
+      }
+    });
 
     const result = await client.invoke(
       new Api.auth.SendCode({
@@ -1048,6 +1070,140 @@ process.on("SIGTERM", async () => {
   console.log("✅ داده‌ها ذخیره شد. خروج...");
   process.exit(0);
 });
+
+async function startHealthCheck() {
+  console.log("🏥 Starting health check service...");
+
+  setInterval(async () => {
+    try {
+      console.log(`🔍 Health check - Active clients: ${activeClients.size}`);
+
+      for (const [userId, client] of activeClients.entries()) {
+        try {
+          if (!client.connected) {
+            console.log(`🔄 Reconnecting client for user ${userId}`);
+            await client.connect();
+
+            // بررسی اینکه واقعاً متصل شده
+            if (await client.isUserAuthorized()) {
+              console.log(
+                `✅ Client reconnected successfully for user ${userId}`
+              );
+            } else {
+              console.log(`❌ Client authorization failed for user ${userId}`);
+              // حذف کلاینت غیرمعتبر
+              activeClients.delete(userId);
+              activeServices.delete(userId);
+            }
+          } else {
+            // بررسی سلامت اتصال با یک درخواست ساده
+            try {
+              await client.getMe();
+              console.log(`✅ Client healthy for user ${userId}`);
+            } catch (healthError) {
+              console.log(
+                `⚠️ Client health issue for user ${userId}:`,
+                healthError.message
+              );
+
+              if (
+                healthError.message.includes("TIMEOUT") ||
+                healthError.message.includes("CONNECTION") ||
+                healthError.message.includes("AUTH_KEY")
+              ) {
+                console.log(
+                  `🔄 Attempting to refresh connection for user ${userId}`
+                );
+
+                try {
+                  await client.disconnect();
+                  await new Promise((resolve) => setTimeout(resolve, 3000));
+                  await client.connect();
+
+                  if (await client.isUserAuthorized()) {
+                    console.log(
+                      `✅ Client refreshed successfully for user ${userId}`
+                    );
+                  }
+                } catch (refreshError) {
+                  console.error(
+                    `❌ Client refresh failed for user ${userId}:`,
+                    refreshError.message
+                  );
+                  // حذف کلاینت مشکل دار
+                  activeClients.delete(userId);
+                  activeServices.delete(userId);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error(
+            `❌ Health check failed for user ${userId}:`,
+            error.message
+          );
+
+          // اگر خطای جدی باشد، کلاینت را حذف کن
+          if (
+            error.message.includes("AUTH_KEY") ||
+            error.message.includes("UNAUTHORIZED")
+          ) {
+            console.log(`🗑️ Removing invalid client for user ${userId}`);
+            activeClients.delete(userId);
+            activeServices.delete(userId);
+          }
+        }
+      }
+
+      // گزارش وضعیت
+      const totalServices = Array.from(activeServices.values()).reduce(
+        (total, userServices) => total + userServices.size,
+        0
+      );
+      console.log(
+        `📊 Health check completed - Clients: ${activeClients.size}, Services: ${totalServices}`
+      );
+    } catch (error) {
+      console.error("❌ Health check system error:", error);
+    }
+  }, 120000); // هر 2 دقیقه چک کن (می‌توانید به 60000 تغییر دهید برای هر دقیقه)
+}
+
+// پاک کردن message mappings منقضی شده هر 30 دقیقه
+async function startCleanupService() {
+  console.log("🧹 Starting cleanup service...");
+
+  setInterval(() => {
+    try {
+      console.log("🧹 Running cleanup for expired message mappings...");
+      let totalCleaned = 0;
+
+      for (const [serviceId, messageMap] of messageMaps.entries()) {
+        const beforeSize = messageMap.size;
+        cleanExpiredMessages(serviceId);
+        const afterSize = messageMap.size;
+        const cleaned = beforeSize - afterSize;
+        totalCleaned += cleaned;
+
+        if (cleaned > 0) {
+          console.log(
+            `🧹 Service ${serviceId}: Cleaned ${cleaned} expired messages`
+          );
+        }
+      }
+
+      if (totalCleaned > 0) {
+        console.log(`🧹 Total cleaned messages: ${totalCleaned}`);
+      }
+    } catch (error) {
+      console.error("❌ Cleanup service error:", error);
+    }
+  }, 30 * 60 * 1000); // هر 30 دقیقه
+}
+
+// شروع سرویس‌های نگهداری
+startHealthCheck();
+startCleanupService();
 
 // Initialize all services on server start
 initializeAllServices();
