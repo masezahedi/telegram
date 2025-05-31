@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function PUT(request, { params }) {
   try {
@@ -18,11 +18,14 @@ export async function PUT(request, { params }) {
     const { id } = params;
     const {
       name,
+      type = "forward",
       sourceChannels,
       targetChannels,
       searchReplaceRules = [],
       useAI,
       promptTemplate,
+      copyHistory = false,
+      historyLimit = 100,
     } = await request.json();
 
     if (!name || !sourceChannels?.length || !targetChannels?.length) {
@@ -53,19 +56,25 @@ export async function PUT(request, { params }) {
       UPDATE forwarding_services
       SET 
         name = ?,
+        type = ?,
         source_channels = ?,
         target_channels = ?,
         search_replace_rules = ?,
         prompt_template = ?,
+        copy_history = ?,
+        history_limit = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND user_id = ?
     `,
       [
         name,
+        type,
         JSON.stringify(sourceChannels),
         JSON.stringify(targetChannels),
         JSON.stringify(searchReplaceRules),
         useAI ? promptTemplate : null,
+        copyHistory ? 1 : 0,
+        historyLimit,
         id,
         decoded.userId,
       ]

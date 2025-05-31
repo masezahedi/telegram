@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
@@ -30,6 +30,9 @@ export async function GET(request) {
         search_replace_rules: JSON.parse(service.search_replace_rules),
         is_active: Boolean(service.is_active),
         useAI: Boolean(service.prompt_template),
+        type: service.type || "forward",
+        copy_history: Boolean(service.copy_history),
+        history_limit: service.history_limit || 100,
       })),
     });
   } catch (error) {
@@ -55,11 +58,14 @@ export async function POST(request) {
 
     const {
       name,
+      type = "forward",
       sourceChannels,
       targetChannels,
       searchReplaceRules = [],
       useAI,
       promptTemplate,
+      copyHistory = false,
+      historyLimit = 100,
     } = await request.json();
 
     if (!name || !sourceChannels?.length || !targetChannels?.length) {
@@ -76,22 +82,28 @@ export async function POST(request) {
         id,
         user_id,
         name,
+        type,
         source_channels,
         target_channels,
         search_replace_rules,
         prompt_template,
+        copy_history,
+        history_limit,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `,
       [
         Date.now().toString(),
         decoded.userId,
         name,
+        type,
         JSON.stringify(sourceChannels),
         JSON.stringify(targetChannels),
         JSON.stringify(searchReplaceRules),
         useAI ? promptTemplate : null,
+        copyHistory ? 1 : 0,
+        historyLimit,
       ]
     );
 
