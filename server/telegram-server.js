@@ -703,7 +703,6 @@ async function startUserServices(userId) {
           appVersion: "1.0.0",
           langCode: "en",
           systemLangCode: "en",
-          baseLogger: "none",
           updatesPendingMax: 20,
         }
       );
