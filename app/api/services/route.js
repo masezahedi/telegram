@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
+// اضافه کردن import برای کنترل سرویس‌ها
+import { stopService, startUserServices } from "@/lib/telegram/service-manager";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
@@ -117,6 +120,7 @@ export async function POST(request) {
   }
 }
 
+// اصلاح شده - با کنترل سرویس در سرور
 export async function PUT(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -132,6 +136,7 @@ export async function PUT(request) {
     const { id, isActive } = await request.json();
     const db = await openDb();
 
+    // بروزرسانی دیتابیس
     await db.run(
       `
       UPDATE forwarding_services
@@ -143,6 +148,23 @@ export async function PUT(request) {
     `,
       [isActive ? 1 : 0, isActive ? 1 : 0, id, decoded.userId]
     );
+
+    // کنترل سرویس در سرور
+    try {
+      if (isActive) {
+        // اگر فعال شده، همه سرویس‌های کاربر رو دوباره راه‌اندازی کن
+        console.log(`🟢 Activating service ${id} for user ${decoded.userId}`);
+        await startUserServices(decoded.userId);
+      } else {
+        // اگر غیرفعال شده، این سرویس رو متوقف کن
+        console.log(`🔴 Deactivating service ${id} for user ${decoded.userId}`);
+        await stopService(decoded.userId, id);
+      }
+    } catch (serviceError) {
+      console.error("Service control error:", serviceError);
+      // حتی اگر کنترل سرویس با خطا مواجه شه، پاسخ موفق برگردون
+      // چون دیتابیس بروزرسانی شده
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -169,6 +191,15 @@ export async function DELETE(request) {
     const { id } = await request.json();
     const db = await openDb();
 
+    // ابتدا سرویس رو متوقف کن
+    try {
+      console.log(`🗑️ Stopping service ${id} before deletion`);
+      await stopService(decoded.userId, id);
+    } catch (serviceError) {
+      console.error("Error stopping service before deletion:", serviceError);
+    }
+
+    // سپس از دیتابیس حذفش کن
     await db.run(
       "DELETE FROM forwarding_services WHERE id = ? AND user_id = ?",
       [id, decoded.userId]

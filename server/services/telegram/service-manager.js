@@ -222,6 +222,8 @@ async function createServiceSpecificEventHandler(
 
 async function startUserServices(userId) {
   try {
+    console.log(`🚀 Starting services for user ${userId}`);
+
     const db = await openDb();
 
     const user = await db.get(
@@ -235,7 +237,7 @@ async function startUserServices(userId) {
     );
 
     if (!user?.telegram_session) {
-      console.log("No Telegram session found for user:", userId);
+      console.log(`⚠️ No Telegram session found for user: ${userId}`);
       return;
     }
 
@@ -245,108 +247,28 @@ async function startUserServices(userId) {
     );
 
     if (services.length === 0) {
-      console.log("No active services found for user:", userId);
+      console.log(`⚠️ No active services found for user: ${userId}`);
       return;
     }
 
+    console.log(
+      `📋 Found ${services.length} active services for user ${userId}`
+    );
+
     const client = await getOrCreateClient(userId, user.telegram_session);
 
-    // Stop existing services first to avoid duplicates
+    // متوقف کردن سرویس‌های قبلی برای جلوگیری از تداخل
     await stopUserServices(userId);
 
-    // Start all services (without event handlers)
+    // شروع همه سرویس‌ها
     for (const service of services) {
       await startForwardingService(service, client, user.gemini_api_key);
     }
 
-    // SOLUTION 1: Use single event handler with duplicate prevention (current approach - fixed)
-    // Get all source channel IDs for this user
-    const allSourceChannelIds = new Set();
-    for (const service of services) {
-      const sourceChannels = JSON.parse(service.source_channels);
-      for (const sourceChannel of sourceChannels) {
-        try {
-          const formattedUsername = sourceChannel.startsWith("@")
-            ? sourceChannel
-            : `@${sourceChannel}`;
-          const entity = await client.getEntity(formattedUsername);
-          allSourceChannelIds.add(entity.id);
-        } catch (err) {
-          console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
-        }
-      }
-    }
+    // تنظیم event handler های جدید
+    await restartUserEventHandlers(userId);
 
-    // Create ONE event handler for this user (with fix)
-    const userServices = activeServices.get(userId);
-    const eventHandler = await createUserEventHandler(
-      userId,
-      userServices,
-      client
-    );
-
-    // Remove any existing event handlers for this user
-    const existingHandlers = userEventHandlers.get(userId) || [];
-    for (const handler of existingHandlers) {
-      client.removeEventHandler(handler);
-    }
-
-    // Add the new event handler
-    client.addEventHandler(
-      eventHandler,
-      new Raw({
-        chats: Array.from(allSourceChannelIds),
-      })
-    );
-
-    // Store the event handler
-    userEventHandlers.set(userId, [eventHandler]);
-
-    // SOLUTION 2: Alternative - Create separate event handlers for each service
-    // Uncomment this section if you prefer separate handlers for each service
-    /*
-    const serviceHandlers = [];
-    const userServices = activeServices.get(userId);
-    
-    for (const [serviceId, serviceData] of userServices.entries()) {
-      const serviceHandler = await createServiceSpecificEventHandler(
-        userId, 
-        serviceId, 
-        serviceData, 
-        client
-      );
-      
-      const sourceChannels = JSON.parse(serviceData.service.source_channels);
-      const sourceChannelIds = [];
-      
-      for (const sourceChannel of sourceChannels) {
-        try {
-          const formattedUsername = sourceChannel.startsWith("@")
-            ? sourceChannel
-            : `@${sourceChannel}`;
-          const entity = await client.getEntity(formattedUsername);
-          sourceChannelIds.push(entity.id);
-        } catch (err) {
-          console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
-        }
-      }
-      
-      if (sourceChannelIds.length > 0) {
-        client.addEventHandler(
-          serviceHandler,
-          new Raw({
-            chats: sourceChannelIds,
-          })
-        );
-        
-        serviceHandlers.push(serviceHandler);
-      }
-    }
-    
-    userEventHandlers.set(userId, serviceHandlers);
-    */
-
-    // Send activation messages
+    // ارسال پیام‌های فعال‌سازی
     for (const service of services) {
       const activationTime = new Date().toLocaleString("fa-IR", {
         timeZone: "Asia/Tehran",
@@ -356,7 +278,7 @@ async function startUserServices(userId) {
         `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
       );
 
-      // Handle copy history if needed
+      // کپی تاریخچه در صورت نیاز
       if (service.type === "copy" && service.copy_history) {
         console.log(`📚 Service ${service.id}: Starting history copy`);
         try {
@@ -394,48 +316,137 @@ async function startUserServices(userId) {
       }
     }
 
-    console.log(
-      `✅ All services started for user ${userId} with fixed event handler`
-    );
+    console.log(`✅ All services started successfully for user ${userId}`);
   } catch (err) {
-    console.error("Error starting user services:", err);
+    console.error(`❌ Error starting user services for ${userId}:`, err);
     throw err;
   }
 }
 
 async function stopService(userId, serviceId) {
   try {
+    console.log(`🛑 Stopping service ${serviceId} for user ${userId}`);
+
     const userServices = activeServices.get(userId);
     if (userServices && userServices.has(serviceId)) {
       const serviceData = userServices.get(serviceId);
 
+      // متوقف کردن cleanup interval
       if (serviceData.cleanupInterval) {
         clearInterval(serviceData.cleanupInterval);
+        console.log(`⏹️ Cleanup interval stopped for service ${serviceId}`);
       }
 
+      // ذخیره و پاک کردن message map
       const messageMap = messageMaps.get(serviceId);
       if (messageMap) {
         cleanExpiredMessages(serviceId);
         saveMessageMap(serviceId, messageMap);
         messageMaps.delete(serviceId);
+        console.log(
+          `🗃️ Message map saved and cleared for service ${serviceId}`
+        );
       }
 
+      // حذف سرویس از فهرست فعال
       userServices.delete(serviceId);
+      console.log(`✅ Service ${serviceId} removed from active services`);
 
-      // If no more services for this user, clean up everything
+      // اگر هیچ سرویسی برای این کاربر نمونده، event handler رو هم پاک کن
       if (userServices.size === 0) {
+        console.log(
+          `🧹 No more services for user ${userId}, cleaning up event handlers`
+        );
+
         activeServices.delete(userId);
 
         const eventHandlers = userEventHandlers.get(userId) || [];
-        const client = await getOrCreateClient(userId);
-        for (const handler of eventHandlers) {
-          client.removeEventHandler(handler);
+        if (eventHandlers.length > 0) {
+          try {
+            const client = await getOrCreateClient(userId);
+            for (const handler of eventHandlers) {
+              client.removeEventHandler(handler);
+              console.log(`🔌 Event handler removed for user ${userId}`);
+            }
+          } catch (err) {
+            console.error(
+              `❌ Error removing event handlers for user ${userId}:`,
+              err
+            );
+          }
+          userEventHandlers.delete(userId);
         }
-        userEventHandlers.delete(userId);
+      } else {
+        // اگر هنوز سرویس‌های دیگه‌ای برای این کاربر هست، event handler رو دوباره تنظیم کن
+        console.log(`🔄 Restarting remaining services for user ${userId}`);
+        await restartUserEventHandlers(userId);
       }
+
+      console.log(`✅ Service ${serviceId} successfully stopped`);
+    } else {
+      console.log(`⚠️ Service ${serviceId} was not active for user ${userId}`);
     }
   } catch (err) {
-    console.error("Error stopping service:", err);
+    console.error(`❌ Error stopping service ${serviceId}:`, err);
+    throw err;
+  }
+}
+
+async function restartUserEventHandlers(userId) {
+  try {
+    const userServices = activeServices.get(userId);
+    if (!userServices || userServices.size === 0) {
+      return;
+    }
+
+    const client = await getOrCreateClient(userId);
+
+    // حذف event handler های قبلی
+    const existingHandlers = userEventHandlers.get(userId) || [];
+    for (const handler of existingHandlers) {
+      client.removeEventHandler(handler);
+    }
+
+    // جمع‌آوری همه source channel ها برای سرویس‌های باقی‌مانده
+    const allSourceChannelIds = new Set();
+    for (const [serviceId, serviceData] of userServices.entries()) {
+      const sourceChannels = JSON.parse(serviceData.service.source_channels);
+      for (const sourceChannel of sourceChannels) {
+        try {
+          const formattedUsername = sourceChannel.startsWith("@")
+            ? sourceChannel
+            : `@${sourceChannel}`;
+          const entity = await client.getEntity(formattedUsername);
+          allSourceChannelIds.add(entity.id);
+        } catch (err) {
+          console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
+        }
+      }
+    }
+
+    // ایجاد event handler جدید
+    if (allSourceChannelIds.size > 0) {
+      const eventHandler = await createUserEventHandler(
+        userId,
+        userServices,
+        client
+      );
+
+      client.addEventHandler(
+        eventHandler,
+        new Raw({
+          chats: Array.from(allSourceChannelIds),
+        })
+      );
+
+      userEventHandlers.set(userId, [eventHandler]);
+      console.log(`🔄 Event handlers restarted for user ${userId}`);
+    }
+  } catch (err) {
+    console.error(
+      `❌ Error restarting event handlers for user ${userId}:`,
+      err
+    );
   }
 }
 
