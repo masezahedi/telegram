@@ -11,6 +11,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Trash2 } from "lucide-react";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Form,
   FormControl,
   FormField,
@@ -27,6 +34,7 @@ const formSchema = z.object({
   name: z.string().min(2, {
     message: "نام سرویس باید حداقل ۲ کاراکتر باشد",
   }),
+  type: z.enum(["forward", "copy"]),
   sourceChannels: z.array(z.string()).min(1, {
     message: "حداقل یک کانال مبدا باید وارد شود",
   }),
@@ -41,6 +49,8 @@ const formSchema = z.object({
       replace: z.string(),
     })
   ),
+  copyHistory: z.boolean().default(false),
+  historyLimit: z.number().min(0).max(1000).optional(),
 });
 
 export default function ForwardingServiceForm({ service, onSuccess }) {
@@ -52,6 +62,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: service?.name || "",
+      type: service?.type || "forward",
       sourceChannels: service?.source_channels || [""],
       targetChannels: service?.target_channels || [""],
       useAI: Boolean(service?.prompt_template),
@@ -59,6 +70,8 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
       searchReplaceRules: service?.search_replace_rules || [
         { search: "", replace: "" },
       ],
+      copyHistory: service?.copy_history || false,
+      historyLimit: service?.history_limit || 100,
     },
   });
 
@@ -170,6 +183,9 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     }
   };
 
+  const serviceType = form.watch("type");
+  const isCopyService = serviceType === "copy";
+
   if (!isTelegramConnected) {
     return (
       <div className="text-center py-8">
@@ -210,8 +226,37 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
           )}
         />
 
+        <FormField
+          control={form.control}
+          name="type"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>نوع سرویس</FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="نوع سرویس را انتخاب کنید" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="forward">فوروارد خودکار</SelectItem>
+                  <SelectItem value="copy">کپی کانال</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormDescription>
+                {isCopyService
+                  ? "کپی تمامی پست‌های یک کانال به کانال دیگر"
+                  : "فوروارد خودکار پیام‌ها از کانال‌های مبدا به مقصد"}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-right">کانال‌های مبدا</h3>
+          <h3 className="text-sm font-medium text-right">
+            {isCopyService ? "کانال مبدا" : "کانال‌های مبدا"}
+          </h3>
           {form.watch("sourceChannels").map((_, index) => (
             <div key={index} className="flex gap-2">
               <Button
@@ -241,19 +286,23 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
               />
             </div>
           ))}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addSourceChannel}
-            className="w-full"
-          >
-            <Plus className="h-4 w-4 ml-2" />
-            افزودن کانال مبدا
-          </Button>
+          {!isCopyService && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addSourceChannel}
+              className="w-full"
+            >
+              <Plus className="h-4 w-4 ml-2" />
+              افزودن کانال مبدا
+            </Button>
+          )}
         </div>
 
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-right">کانال‌های مقصد</h3>
+          <h3 className="text-sm font-medium text-right">
+            {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
+          </h3>
           {form.watch("targetChannels").map((_, index) => (
             <div key={index} className="flex gap-2">
               <Button
@@ -283,16 +332,73 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
               />
             </div>
           ))}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addTargetChannel}
-            className="w-full"
-          >
-            <Plus className="h-4 w-4 ml-2" />
-            افزودن کانال مقصد
-          </Button>
+          {!isCopyService && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addTargetChannel}
+              className="w-full"
+            >
+              <Plus className="h-4 w-4 ml-2" />
+              افزودن کانال مقصد
+            </Button>
+          )}
         </div>
+
+        {isCopyService && (
+          <>
+            <FormField
+              control={form.control}
+              name="copyHistory"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5 text-right">
+                    <FormLabel className="text-base">
+                      کپی پیام‌های قبلی
+                    </FormLabel>
+                    <FormDescription>
+                      کپی پیام‌های قدیمی کانال مبدا به کانال مقصد
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            {form.watch("copyHistory") && (
+              <FormField
+                control={form.control}
+                name="historyLimit"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="1000"
+                        placeholder="تعداد پیام‌ها را وارد کنید"
+                        {...field}
+                        onChange={(e) =>
+                          field.onChange(parseInt(e.target.value, 10))
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      حداکثر 1000 پیام قدیمی قابل کپی است
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+          </>
+        )}
 
         <FormField
           control={form.control}

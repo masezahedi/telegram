@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import ForwardingServiceForm from "./forwarding-service-form";
 
@@ -141,6 +142,7 @@ export default function ForwardingServiceList({ onUpdate }) {
             <TableHeader>
               <TableRow>
                 <TableHead>نام سرویس</TableHead>
+                <TableHead>نوع سرویس</TableHead>
                 <TableHead>کانال‌های مبدا</TableHead>
                 <TableHead>کانال‌های مقصد</TableHead>
                 <TableHead>وضعیت</TableHead>
@@ -151,6 +153,15 @@ export default function ForwardingServiceList({ onUpdate }) {
               {services.map((service) => (
                 <TableRow key={service.id}>
                   <TableCell className="font-medium">{service.name}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        service.type === "copy" ? "secondary" : "default"
+                      }
+                    >
+                      {service.type === "copy" ? "کپی کانال" : "فوروارد خودکار"}
+                    </Badge>
+                  </TableCell>
                   <TableCell>{service.source_channels.join(", ")}</TableCell>
                   <TableCell>{service.target_channels.join(", ")}</TableCell>
                   <TableCell>
