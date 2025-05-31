@@ -104,12 +104,18 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     try {
       const cleanedValues = {
         ...values,
+        type: values.type, // Ensure type is included
         sourceChannels: values.sourceChannels.filter(Boolean),
         targetChannels: values.targetChannels.filter(Boolean),
         searchReplaceRules: values.searchReplaceRules.filter(
           (rule) => rule.search && rule.replace
         ),
         promptTemplate: values.useAI ? values.promptTemplate : null,
+        copyHistory: values.type === "copy" ? values.copyHistory : false,
+        historyLimit:
+          values.type === "copy" && values.copyHistory
+            ? values.historyLimit
+            : 100,
       };
 
       const result = service?.id
