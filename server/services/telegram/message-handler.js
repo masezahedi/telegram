@@ -56,7 +56,14 @@ async function sendNewMessage(
 }
 
 // Process message
-async function processMessage(message, isEdit, sourceChannelIds, service, client, genAI) {
+async function processMessage(
+  message,
+  isEdit,
+  sourceChannelIds,
+  service,
+  client,
+  genAI
+) {
   try {
     const serviceId = service.id;
     const targetChannels = JSON.parse(service.target_channels);
@@ -85,26 +92,33 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
     }
 
     // بررسی source channel
-    const isFromSourceChannel = sourceChannelIds.some(sourceId => {
+    const isFromSourceChannel = sourceChannelIds.some((sourceId) => {
       const sourceIdStr = sourceId?.toString?.() || String(sourceId);
       const channelIdStr = channelId?.toString?.() || String(channelId);
-      return sourceIdStr === channelIdStr ||
+      return (
+        sourceIdStr === channelIdStr ||
         sourceId?.value?.toString() === channelId?.value?.toString() ||
-        Math.abs(sourceId) === Math.abs(channelId);
+        Math.abs(sourceId) === Math.abs(channelId)
+      );
     });
 
     if (!isFromSourceChannel) {
-      console.log(`⛔ Service ${serviceId}: Message from non-source channel ignored`);
+      console.log(
+        `⛔ Service ${serviceId}: Message from non-source channel ignored`
+      );
       return null;
     }
 
     const originalText = message.message || message.caption;
-    const hasMedia = message.media &&
+    const hasMedia =
+      message.media &&
       message.media.className !== "MessageMediaEmpty" &&
       message.media.className !== "MessageMediaWebPage";
 
     if (!originalText && !hasMedia) {
-      console.log(`⛔ Service ${serviceId}: Message without text and media ignored`);
+      console.log(
+        `⛔ Service ${serviceId}: Message without text and media ignored`
+      );
       return null;
     }
 
@@ -116,8 +130,10 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
     console.log(`📝 Processing message: ${messageKey}, isEdit: ${isEdit}`);
 
     // اگر پیام قبلاً پردازش شده، از ارسال مجدد جلوگیری کن
-    if (messageMap.has(messageKey) {
-      console.log(`⏭️ Service ${serviceId}: Message already processed, skipping`);
+    if (messageMap.has(messageKey)) {
+      console.log(
+        `⏭️ Service ${serviceId}: Message already processed, skipping`
+      );
       return null;
     }
 
@@ -162,7 +178,9 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
         const targetEntity = await client.getEntity(formattedUsername);
 
         // ارسال پیام جدید (حتی برای ویرایش، اگر پیام هدف وجود نداشته باشد)
-        console.log(`📤 Service ${serviceId}: Sending message to ${targetUsername}`);
+        console.log(
+          `📤 Service ${serviceId}: Sending message to ${targetUsername}`
+        );
         const sentMessage = await sendNewMessage(
           message,
           processedText,
@@ -173,7 +191,9 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
 
         if (sentMessage) {
           forwardedMessages[targetUsername] = sentMessage.id.toString();
-          console.log(`✅ Service ${serviceId}: Message sent to ${targetUsername} (ID: ${sentMessage.id})`);
+          console.log(
+            `✅ Service ${serviceId}: Message sent to ${targetUsername} (ID: ${sentMessage.id})`
+          );
         }
       } catch (err) {
         console.error(`❌ Error sending to ${targetUsername}:`, err);
@@ -186,7 +206,7 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
         targetMessageIds: forwardedMessages,
         timestamp: currentTime,
         originalChannelId: channelId.toString(),
-        originalMessageId: message.id
+        originalMessageId: message.id,
       };
       messageMap.set(messageKey, messageData);
       messageMaps.set(serviceId, messageMap);
@@ -194,7 +214,6 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
     }
 
     return forwardedMessages; // بازگرداندن پیام‌های فوروارد شده
-
   } catch (err) {
     console.error(`❌ Service ${service.id}: Message processing error:`, err);
     return null;
