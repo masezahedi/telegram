@@ -257,6 +257,7 @@ async function startUserServices(userId) {
 }
 
 // تابع جدید برای کپی تاریخچه
+// Fixed startCopyHistory function with correct logic
 async function startCopyHistory(service, client, userId) {
   console.log(`📚 Service ${service.id}: Starting history copy`);
 
@@ -322,26 +323,32 @@ async function startCopyHistory(service, client, userId) {
       console.log(`📍 Getting messages by direction: ${historyDirection}`);
 
       if (historyDirection === "oldest") {
-        // قدیمی‌ترین پیام‌ها
+        // قدیمی‌ترین پیام‌ها - از اول کانال
+        console.log(`📜 Fetching oldest ${limit} messages`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
           reverse: true, // از قدیم به جدید
         });
-        // پیام‌ها قبلاً به ترتیب درست هستند
+        // پیام‌ها از قدیم به جدید آمده‌اند - نیازی به معکوس کردن نیست
+        console.log(`📨 Retrieved ${messages.length} oldest messages`);
       } else {
-        // جدیدترین پیام‌ها (پیش‌فرض)
+        // جدیدترین پیام‌ها (پیش‌فرض) - از آخر کانال
+        console.log(`📜 Fetching newest ${limit} messages`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
           reverse: false, // از جدید به قدیم گرفته می‌شود
         });
         // پیام‌ها را معکوس کن تا از قدیم به جدید ارسال شوند
         messages.reverse();
+        console.log(
+          `📨 Retrieved ${messages.length} newest messages, reversed for chronological order`
+        );
       }
     }
 
     console.log(`📨 Found ${messages.length} messages to copy`);
 
-    // بررسی اینکه پیام‌های یکتا باشند
+    // بررسی اینکه پیام‌های یکتا باشند و لاگ اطلاعات پیام‌ها
     const uniqueMessages = [];
     const seenMessageIds = new Set();
 
@@ -349,12 +356,21 @@ async function startCopyHistory(service, client, userId) {
       if (!seenMessageIds.has(message.id)) {
         seenMessageIds.add(message.id);
         uniqueMessages.push(message);
+        console.log(
+          `📝 Message ${message.id}: ${message.date} - "${
+            message.message
+              ? message.message.substring(0, 50) + "..."
+              : "Media message"
+          }"`
+        );
       } else {
         console.log(`⚠️ Duplicate message found and skipped: ${message.id}`);
       }
     }
 
-    console.log(`📨 Processing ${uniqueMessages.length} unique messages`);
+    console.log(
+      `📨 Processing ${uniqueMessages.length} unique messages in chronological order`
+    );
 
     const userServices = activeServices.get(userId);
     const serviceData = userServices?.get(service.id);
@@ -379,7 +395,7 @@ async function startCopyHistory(service, client, userId) {
       console.log(
         `📤 Processing message ${i + 1}/${uniqueMessages.length} - ID: ${
           message.id
-        }`
+        }, Date: ${message.date}`
       );
 
       try {
@@ -394,6 +410,7 @@ async function startCopyHistory(service, client, userId) {
             serviceData.genAI
           );
           copiedCount++;
+          console.log(`✅ Message ${message.id} copied successfully`);
 
           // تاخیر بین پیام‌ها برای جلوگیری از محدودیت تلگرام
           await new Promise((resolve) => setTimeout(resolve, 2000));
