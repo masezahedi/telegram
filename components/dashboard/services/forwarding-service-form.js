@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Info } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -27,6 +27,7 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
@@ -67,14 +68,26 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     defaultValues: {
       name: service?.name || "",
       type: service?.type || "forward",
-      sourceChannels: service?.source_channels || [""],
-      targetChannels: service?.target_channels || [""],
+      sourceChannels: service?.source_channels
+        ? Array.isArray(service.source_channels)
+          ? service.source_channels
+          : JSON.parse(service.source_channels || '[""]')
+        : [""],
+      targetChannels: service?.target_channels
+        ? Array.isArray(service.target_channels)
+          ? service.target_channels
+          : JSON.parse(service.target_channels || '[""]')
+        : [""],
       useAI: Boolean(service?.prompt_template),
       promptTemplate: service?.prompt_template || "",
-      searchReplaceRules: service?.search_replace_rules || [
-        { search: "", replace: "" },
-      ],
-      copyHistory: service?.copy_history || false,
+      searchReplaceRules: service?.search_replace_rules
+        ? Array.isArray(service.search_replace_rules)
+          ? service.search_replace_rules
+          : JSON.parse(
+              service.search_replace_rules || '[{"search":"","replace":""}]'
+            )
+        : [{ search: "", replace: "" }],
+      copyHistory: Boolean(service?.copy_history),
       historyLimit: service?.history_limit || 100,
       historyDirection: service?.history_direction || "newest",
       startFromId: service?.start_from_id || "",
@@ -107,13 +120,47 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
       return;
     }
 
+    // اعتبارسنجی ویژه برای کپی سرویس
+    if (values.type === "copy") {
+      if (values.sourceChannels.filter(Boolean).length > 1) {
+        toast.error("در حالت کپی کانال، فقط یک کانال مبدا مجاز است");
+        return;
+      }
+
+      if (values.targetChannels.filter(Boolean).length > 1) {
+        toast.error("در حالت کپی کانال، فقط یک کانال مقصد مجاز است");
+        return;
+      }
+
+      // اعتبارسنجی شناسه پیام
+      if (values.startFromId && values.startFromId.trim()) {
+        const messageId = parseInt(values.startFromId.trim());
+        if (isNaN(messageId) || messageId <= 0) {
+          toast.error("شناسه پیام باید یک عدد مثبت باشد");
+          return;
+        }
+      }
+    }
+
     setLoading(true);
     try {
       const cleanedValues = {
         ...values,
         type: values.type,
-        sourceChannels: values.sourceChannels.filter(Boolean),
-        targetChannels: values.targetChannels.filter(Boolean),
+        sourceChannels: values.sourceChannels
+          .filter(Boolean)
+          .map((channel) =>
+            channel.trim().startsWith("@")
+              ? channel.trim()
+              : `@${channel.trim()}`
+          ),
+        targetChannels: values.targetChannels
+          .filter(Boolean)
+          .map((channel) =>
+            channel.trim().startsWith("@")
+              ? channel.trim()
+              : `@${channel.trim()}`
+          ),
         searchReplaceRules: values.searchReplaceRules.filter(
           (rule) => rule.search && rule.replace
         ),
@@ -124,9 +171,12 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
             ? values.historyLimit
             : 100,
         historyDirection:
-          values.type === "copy" ? values.historyDirection : null,
-        startFromId: values.type === "copy" ? values.startFromId : null,
-        copyDirection: values.type === "copy" ? values.copyDirection : null,
+          values.type === "copy" ? values.historyDirection : "newest",
+        startFromId:
+          values.type === "copy" && values.startFromId
+            ? values.startFromId.trim()
+            : null,
+        copyDirection: values.type === "copy" ? values.copyDirection : "before",
       };
 
       const result = service?.id
@@ -264,13 +314,24 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
               </Select>
               <FormDescription>
                 {isCopyService
-                  ? "کپی تمامی پست‌های یک کانال به کانال دیگر"
-                  : "فوروارد خودکار پیام‌ها از کانال‌های مبدا به مقصد"}
+                  ? "کپی تمامی پست‌های یک کانال به کانال دیگر (تک کانال)"
+                  : "فوروارد خودکار پیام‌ها از کانال‌های مبدا به مقصد (چند کانال)"}
               </FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
+
+        {isCopyService && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription className="text-right">
+              <strong>توجه:</strong> در حالت کپی کانال، فقط یک کانال مبدا و یک
+              کانال مقصد قابل انتخاب است. این حالت برای کپی کامل محتوای یک کانال
+              به کانال دیگر طراحی شده است.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-right">
@@ -294,7 +355,11 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                   <FormItem className="flex-1">
                     <FormControl>
                       <Input
-                        placeholder="نام کاربری کانال مبدا"
+                        placeholder={
+                          isCopyService
+                            ? "نام کاربری کانال مبدا (مثال: @channelname)"
+                            : "نام کاربری کانال مبدا"
+                        }
                         className="text-right"
                         {...field}
                       />
@@ -340,7 +405,11 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                   <FormItem className="flex-1">
                     <FormControl>
                       <Input
-                        placeholder="نام کاربری کانال مقصد"
+                        placeholder={
+                          isCopyService
+                            ? "نام کاربری کانال مقصد (مثال: @targetchannel)"
+                            : "نام کاربری کانال مقصد"
+                        }
                         className="text-right"
                         {...field}
                       />
@@ -376,7 +445,8 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                       کپی پیام‌های قبلی
                     </FormLabel>
                     <FormDescription>
-                      کپی پیام‌های قدیمی کانال مبدا به کانال مقصد
+                      کپی پیام‌های قدیمی کانال مبدا به کانال مقصد هنگام
+                      فعال‌سازی سرویس
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -402,15 +472,15 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                           type="number"
                           min="1"
                           max="10000"
-                          placeholder="تعداد پیام‌ها را وارد کنید"
+                          placeholder="100"
                           {...field}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10))
+                            field.onChange(parseInt(e.target.value, 10) || 100)
                           }
                         />
                       </FormControl>
                       <FormDescription>
-                        حداکثر 10000 پیام قابل کپی است
+                        حداکثر 10000 پیام قابل کپی است (پیش‌فرض: 100)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -422,7 +492,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                   name="historyDirection"
                   render={({ field }) => (
                     <FormItem className="space-y-3">
-                      <FormLabel>ترتیب کپی پیام‌ها</FormLabel>
+                      <FormLabel>ترتیب انتخاب پیام‌ها</FormLabel>
                       <FormControl>
                         <RadioGroup
                           onValueChange={field.onChange}
@@ -434,7 +504,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                               <RadioGroupItem value="newest" />
                             </FormControl>
                             <FormLabel className="font-normal">
-                              جدیدترین پیام‌ها
+                              جدیدترین پیام‌ها (پیش‌فرض)
                             </FormLabel>
                           </FormItem>
                           <FormItem className="flex items-center space-x-3 space-x-reverse">
@@ -447,13 +517,22 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                           </FormItem>
                         </RadioGroup>
                       </FormControl>
+                      <FormDescription>
+                        انتخاب کنید که از کدام پیام‌ها شروع به کپی کند
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
 
-                <div className="space-y-4 border rounded-lg p-4">
-                  <FormLabel>کپی از پیام خاص (اختیاری)</FormLabel>
+                <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 text-muted-foreground" />
+                    <FormLabel className="text-sm font-medium">
+                      کپی از پیام خاص (پیشرفته - اختیاری)
+                    </FormLabel>
+                  </div>
+
                   <FormField
                     control={form.control}
                     name="startFromId"
@@ -462,22 +541,26 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                         <FormLabel>شناسه پیام</FormLabel>
                         <FormControl>
                           <Input
-                            placeholder="شناسه پیام را وارد کنید"
+                            type="number"
+                            placeholder="مثال: 12345"
                             {...field}
                           />
                         </FormControl>
+                        <FormDescription>
+                          شناسه پیام مرجع برای شروع کپی (عدد مثبت)
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
 
-                  {startFromId && (
+                  {startFromId && startFromId.trim() && (
                     <FormField
                       control={form.control}
                       name="copyDirection"
                       render={({ field }) => (
                         <FormItem className="space-y-3">
-                          <FormLabel>جهت کپی</FormLabel>
+                          <FormLabel>جهت کپی نسبت به پیام مرجع</FormLabel>
                           <FormControl>
                             <RadioGroup
                               onValueChange={field.onChange}
@@ -489,7 +572,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                                   <RadioGroupItem value="before" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
-                                  پیام‌های قبل از این شناسه
+                                  پیام‌های قبل از این شناسه (قدیمی‌تر)
                                 </FormLabel>
                               </FormItem>
                               <FormItem className="flex items-center space-x-3 space-x-reverse">
@@ -497,11 +580,15 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                                   <RadioGroupItem value="after" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
-                                  پیام‌های بعد از این شناسه
+                                  پیام‌های بعد از این شناسه (جدیدتر)
                                 </FormLabel>
                               </FormItem>
                             </RadioGroup>
                           </FormControl>
+                          <FormDescription>
+                            انتخاب کنید که پیام‌های قبل یا بعد از شناسه مرجع کپی
+                            شوند
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -523,7 +610,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                   استفاده از هوش مصنوعی
                 </FormLabel>
                 <FormDescription>
-                  ترجمه خودکار متن‌ها با استفاده از هوش مصنوعی
+                  ترجمه یا تبدیل خودکار متن‌ها با استفاده از هوش مصنوعی Gemini
                 </FormDescription>
               </div>
               <FormControl>
@@ -537,6 +624,16 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
           )}
         />
 
+        {!hasGeminiKey && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription className="text-right">
+              برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات
+              وارد کنید.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {form.watch("useAI") && (
           <FormField
             control={form.control}
@@ -546,14 +643,15 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
                 <FormLabel className="text-right block">قالب پرامپت</FormLabel>
                 <FormControl>
                   <Textarea
-                    placeholder="قالب پرامپت را وارد کنید"
+                    placeholder="مثال: متن زیر را به فارسی ترجمه کن: {text}"
                     className="min-h-[150px] font-mono text-sm text-right"
                     dir="rtl"
                     {...field}
                   />
                 </FormControl>
                 <FormDescription className="text-right">
-                  از {"{text}"} برای جایگذاری متن اصلی استفاده کنید
+                  از {"{text}"} برای جایگذاری متن اصلی استفاده کنید. مثال: "متن
+                  زیر را خلاصه کن: {"{text}"}"
                 </FormDescription>
                 <FormMessage className="text-right" />
               </FormItem>
@@ -563,8 +661,11 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
 
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-right">
-            قوانین جایگزینی متن
+            قوانین جایگزینی متن (اختیاری)
           </h3>
+          <FormDescription className="text-right text-sm">
+            برای جایگزینی خودکار کلمات یا عبارات خاص در متن پیام‌ها
+          </FormDescription>
           {form.watch("searchReplaceRules").map((_, index) => (
             <div key={index} className="flex gap-2">
               <Button
