@@ -15,6 +15,8 @@ const { openDb } = require("../../utils/db");
 const activeServices = new Map();
 // Store user event handlers (one per user)
 const userEventHandlers = new Map();
+// Store copy history tasks
+const copyHistoryTasks = new Map();
 
 // بهتر شده: Event handler که هم new message و هم edit رو handle میکنه
 async function createUserEventHandler(userId, services, client) {
@@ -30,7 +32,10 @@ async function createUserEventHandler(userId, services, client) {
         message = update.message;
         isEdit = false;
         console.log(`📨 New channel message: ${message.id}`);
-      } else if (update.className === "UpdateEditChannelMessage" && update.message) {
+      } else if (
+        update.className === "UpdateEditChannelMessage" &&
+        update.message
+      ) {
         message = update.message;
         isEdit = true;
         console.log(`✏️ Edit channel message: ${message.id}`);
@@ -67,7 +72,9 @@ async function createUserEventHandler(userId, services, client) {
         return;
       }
 
-      console.log(`📍 Processing message from channel: ${channelId}, isEdit: ${isEdit}`);
+      console.log(
+        `📍 Processing message from channel: ${channelId}, isEdit: ${isEdit}`
+      );
 
       // Process message for each relevant service
       for (const [serviceId, serviceData] of services.entries()) {
@@ -89,8 +96,8 @@ async function createUserEventHandler(userId, services, client) {
               // بهتر شده: مقایسه دقیق‌تر
               const entityIdStr = entity.id?.toString() || String(entity.id);
               const channelIdStr = channelId?.toString() || String(channelId);
-              
-              const isMatch = 
+
+              const isMatch =
                 entityIdStr === channelIdStr ||
                 entity.id?.value?.toString() === channelId?.value?.toString() ||
                 Math.abs(entity.id) === Math.abs(channelId);
@@ -98,17 +105,24 @@ async function createUserEventHandler(userId, services, client) {
               if (isMatch) {
                 isFromThisServiceSource = true;
                 matchedSourceChannelIds.push(entity.id);
-                console.log(`✅ Message matches source channel for service ${serviceId}: ${formattedUsername}`);
+                console.log(
+                  `✅ Message matches source channel for service ${serviceId}: ${formattedUsername}`
+                );
                 break;
               }
             } catch (err) {
-              console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
+              console.error(
+                `❌ Error getting entity for ${sourceChannel}:`,
+                err
+              );
               continue;
             }
           }
 
           if (isFromThisServiceSource && matchedSourceChannelIds.length > 0) {
-            console.log(`🔄 Processing message for service ${serviceId}, isEdit: ${isEdit}`);
+            console.log(
+              `🔄 Processing message for service ${serviceId}, isEdit: ${isEdit}`
+            );
 
             await processMessage(
               message,
@@ -120,7 +134,10 @@ async function createUserEventHandler(userId, services, client) {
             );
           }
         } catch (err) {
-          console.error(`❌ Error processing message for service ${serviceId}:`, err);
+          console.error(
+            `❌ Error processing message for service ${serviceId}:`,
+            err
+          );
         }
       }
     } catch (err) {
@@ -199,7 +216,9 @@ async function startUserServices(userId) {
       return;
     }
 
-    console.log(`📋 Found ${services.length} active services for user ${userId}`);
+    console.log(
+      `📋 Found ${services.length} active services for user ${userId}`
+    );
 
     const client = await getOrCreateClient(userId, user.telegram_session);
 
@@ -214,7 +233,7 @@ async function startUserServices(userId) {
     // بهتر شده: تنظیم event handler برای همه سرویس‌ها
     await setupUserEventHandlers(userId);
 
-    // ارسال پیام‌های فعال‌سازی
+    // ارسال پیام‌های فعال‌سازی و شروع کپی تاریخچه
     for (const service of services) {
       const activationTime = new Date().toLocaleString("fa-IR", {
         timeZone: "Asia/Tehran",
@@ -235,15 +254,51 @@ async function startUserServices(userId) {
               : `@${sourceChannels[0]}`
           );
 
-          const messages = await client.getMessages(sourceChannel, {
-            limit: service.history_limit || 100,
-            reverse: true,
-          });
+          // Create a new copy history task
+          const taskId = `${userId}_${service.id}`;
+          const task = {
+            active: true,
+            cancel: () => {
+              task.active = false;
+            },
+          };
+          copyHistoryTasks.set(taskId, task);
+
+          const historyDirection = service.history_direction || "newest";
+          const startFromId = service.start_from_id;
+          const copyDirection = service.copy_direction || "before";
+          const limit = service.history_limit || 100;
+
+          let messages;
+          if (startFromId) {
+            // Get messages based on specific message ID
+            const offsetId = parseInt(startFromId);
+            messages = await client.getMessages(sourceChannel, {
+              limit: limit,
+              offsetId: offsetId,
+              reverse: copyDirection === "before",
+              addOffset: copyDirection === "after" ? 1 : 0,
+            });
+          } else {
+            // Get messages based on history direction
+            messages = await client.getMessages(sourceChannel, {
+              limit: limit,
+              reverse: historyDirection === "oldest",
+            });
+          }
 
           const userServices = activeServices.get(userId);
           const serviceData = userServices.get(service.id);
 
           for (const message of messages) {
+            // Check if the task is still active
+            if (!copyHistoryTasks.get(taskId)?.active) {
+              console.log(
+                `🛑 Service ${service.id}: Copy history task cancelled`
+              );
+              break;
+            }
+
             await processMessage(
               message,
               false,
@@ -255,6 +310,8 @@ async function startUserServices(userId) {
             await new Promise((resolve) => setTimeout(resolve, 2000));
           }
 
+          // Clean up the task
+          copyHistoryTasks.delete(taskId);
           console.log(`✅ Service ${service.id}: History copy completed`);
         } catch (err) {
           console.error(`❌ Service ${service.id}: History copy error:`, err);
@@ -269,7 +326,6 @@ async function startUserServices(userId) {
   }
 }
 
-// بهتر شده: جداگانه event handler setup کن
 async function setupUserEventHandlers(userId) {
   try {
     const userServices = activeServices.get(userId);
@@ -297,7 +353,9 @@ async function setupUserEventHandlers(userId) {
             : `@${sourceChannel}`;
           const entity = await client.getEntity(formattedUsername);
           allSourceChannelIds.add(entity.id);
-          console.log(`📡 Added source channel ${formattedUsername} (${entity.id}) for service ${serviceId}`);
+          console.log(
+            `📡 Added source channel ${formattedUsername} (${entity.id}) for service ${serviceId}`
+          );
         } catch (err) {
           console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
         }
@@ -306,7 +364,11 @@ async function setupUserEventHandlers(userId) {
 
     // ایجاد event handler جدید
     if (allSourceChannelIds.size > 0) {
-      const eventHandler = await createUserEventHandler(userId, userServices, client);
+      const eventHandler = await createUserEventHandler(
+        userId,
+        userServices,
+        client
+      );
 
       // بهتر شده: از Raw event استفاده کن که همه update type ها رو handle کنه
       client.addEventHandler(
@@ -317,18 +379,32 @@ async function setupUserEventHandlers(userId) {
       );
 
       userEventHandlers.set(userId, [eventHandler]);
-      console.log(`🔄 Event handlers setup for user ${userId} with ${allSourceChannelIds.size} channels`);
+      console.log(
+        `🔄 Event handlers setup for user ${userId} with ${allSourceChannelIds.size} channels`
+      );
     } else {
       console.log(`⚠️ No valid source channels found for user ${userId}`);
     }
   } catch (err) {
-    console.error(`❌ Error setting up event handlers for user ${userId}:`, err);
+    console.error(
+      `❌ Error setting up event handlers for user ${userId}:`,
+      err
+    );
   }
 }
 
 async function stopService(userId, serviceId) {
   try {
     console.log(`🛑 Stopping service ${serviceId} for user ${userId}`);
+
+    // Cancel any ongoing copy history task
+    const taskId = `${userId}_${serviceId}`;
+    const copyTask = copyHistoryTasks.get(taskId);
+    if (copyTask) {
+      copyTask.cancel();
+      copyHistoryTasks.delete(taskId);
+      console.log(`🛑 Copy history task cancelled for service ${serviceId}`);
+    }
 
     const userServices = activeServices.get(userId);
     if (userServices && userServices.has(serviceId)) {
@@ -346,7 +422,9 @@ async function stopService(userId, serviceId) {
         cleanExpiredMessages(serviceId);
         saveMessageMap(serviceId, messageMap);
         messageMaps.delete(serviceId);
-        console.log(`🗃️ Message map saved and cleared for service ${serviceId}`);
+        console.log(
+          `🗃️ Message map saved and cleared for service ${serviceId}`
+        );
       }
 
       // حذف سرویس از فهرست فعال
@@ -355,7 +433,9 @@ async function stopService(userId, serviceId) {
 
       // اگر هیچ سرویسی برای این کاربر نمونده، event handler رو هم پاک کن
       if (userServices.size === 0) {
-        console.log(`🧹 No more services for user ${userId}, cleaning up event handlers`);
+        console.log(
+          `🧹 No more services for user ${userId}, cleaning up event handlers`
+        );
         activeServices.delete(userId);
         await cleanupUserEventHandlers(userId);
       } else {
@@ -386,7 +466,10 @@ async function cleanupUserEventHandlers(userId) {
       userEventHandlers.delete(userId);
     }
   } catch (err) {
-    console.error(`❌ Error cleaning up event handlers for user ${userId}:`, err);
+    console.error(
+      `❌ Error cleaning up event handlers for user ${userId}:`,
+      err
+    );
   }
 }
 
@@ -454,3 +537,5 @@ module.exports = {
   stopUserServices,
   initializeAllServices,
 };
+
+export { stopService, startUserServices };
