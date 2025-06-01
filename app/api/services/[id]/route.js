@@ -26,6 +26,9 @@ export async function PUT(request, { params }) {
       promptTemplate,
       copyHistory = false,
       historyLimit = 100,
+      historyDirection = "newest",
+      startFromId = null,
+      copyDirection = "before",
     } = await request.json();
 
     if (!name || !sourceChannels?.length || !targetChannels?.length) {
@@ -63,6 +66,9 @@ export async function PUT(request, { params }) {
         prompt_template = ?,
         copy_history = ?,
         history_limit = ?,
+        history_direction,
+        start_from_id,
+        copy_direction,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND user_id = ?
     `,
@@ -75,6 +81,9 @@ export async function PUT(request, { params }) {
         useAI ? promptTemplate : null,
         copyHistory ? 1 : 0,
         historyLimit,
+        historyDirection, // اضافه شده
+        startFromId, // اضافه شده
+        copyDirection, // اضافه شده
         id,
         decoded.userId,
       ]

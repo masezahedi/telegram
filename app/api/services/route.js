@@ -75,6 +75,9 @@ export async function POST(request) {
       promptTemplate,
       copyHistory = false,
       historyLimit = 100,
+      historyDirection = "newest",
+      startFromId = null,
+      copyDirection = "before",
     } = await request.json();
 
     if (!name || !sourceChannels?.length || !targetChannels?.length) {
