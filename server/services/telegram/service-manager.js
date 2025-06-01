@@ -1,4 +1,4 @@
-// Fixed service-manager.js - حل مشکل ارسال دوباره
+// Fixed service-manager.js - بخش event handler
 const { Raw, NewMessage } = require("telegram/events");
 const { getOrCreateClient } = require("./client");
 const { processMessage, sendNotificationToUser } = require("./message-handler");
@@ -15,12 +15,12 @@ const { openDb } = require("../../utils/db");
 const activeServices = new Map();
 // Store user event handlers (one per user)
 const userEventHandlers = new Map();
-// Store copy history tasks
+// Store copy history tasks - برای متوقف کردن کپی تاریخچه
 const copyHistoryTasks = new Map();
-// اضافه کردن: ذخیره پیام‌های در حال پردازش برای جلوگیری از تکرار
-const processingMessages = new Map(); // key: `${serviceId}_${messageId}`, value: timestamp
+const lastCopyHistoryRunTimestamp = new Map(); // <--- متغیر جدید
+const MIN_INTERVAL_BETWEEN_COPY_HISTORY_RUNS = 5 * 60 * 1000; // 5 دقیقه به میلی‌ثانیه
 
-// بهتر شده: Event handler با بررسی تکرار
+// بهتر شده: Event handler که هم new message و هم edit رو handle میکنه
 async function createUserEventHandler(userId, services, client) {
   return async (update) => {
     try {
@@ -29,23 +29,28 @@ async function createUserEventHandler(userId, services, client) {
 
       console.log(`📡 Update received for user ${userId}: ${update.className}`);
 
-      // Extract message from update
+      // Extract message from update - بهتر شده
       if (update.className === "UpdateNewChannelMessage" && update.message) {
         message = update.message;
         isEdit = false;
+        console.log(`📨 New channel message: ${message.id}`);
       } else if (
         update.className === "UpdateEditChannelMessage" &&
         update.message
       ) {
         message = update.message;
         isEdit = true;
+        console.log(`✏️ Edit channel message: ${message.id}`);
       } else if (update.className === "UpdateNewMessage" && update.message) {
         message = update.message;
         isEdit = false;
+        console.log(`📨 New message: ${message.id}`);
       } else if (update.className === "UpdateEditMessage" && update.message) {
         message = update.message;
         isEdit = true;
+        console.log(`✏️ Edit message: ${message.id}`);
       } else {
+        // Ignore other update types
         return;
       }
 
@@ -54,7 +59,7 @@ async function createUserEventHandler(userId, services, client) {
         return;
       }
 
-      // استخراج channel ID
+      // بهتر شده: دقیق‌تر channel ID استخراج کن
       let channelId = null;
       if (message.peerId?.channelId) {
         channelId = message.peerId.channelId;
@@ -70,31 +75,16 @@ async function createUserEventHandler(userId, services, client) {
       }
 
       console.log(
-        `📍 Processing message from channel: ${channelId}, messageId: ${message.id}, isEdit: ${isEdit}`
+        `📍 Processing message from channel: ${channelId}, isEdit: ${isEdit}`
       );
 
       // Process message for each relevant service
       for (const [serviceId, serviceData] of services.entries()) {
         try {
           const service = serviceData.service;
-
-          // فقط پیام‌های جدید را برای سرویس‌های کپی تاریخچه پردازش نکن
-          // چون کپی تاریخچه خودش این کار را انجام می‌دهد
-          if (service.type === "copy" && service.copy_history && !isEdit) {
-            // بررسی اینکه آیا کپی تاریخچه در حال اجرا است
-            const taskId = `${userId}_${serviceId}`;
-            const copyTask = copyHistoryTasks.get(taskId);
-            if (copyTask && copyTask.processing) {
-              console.log(
-                `⏭️ Skipping live message ${message.id} for service ${serviceId} - copy history is processing`
-              );
-              continue;
-            }
-          }
-
           const sourceChannels = JSON.parse(service.source_channels);
 
-          // بررسی اینکه پیام از source channel این سرویس است
+          // بهتر شده: دقیق‌تر بررسی کن که از source channel این سرویس هست یا نه
           let isFromThisServiceSource = false;
           const matchedSourceChannelIds = [];
 
@@ -105,6 +95,7 @@ async function createUserEventHandler(userId, services, client) {
                 : `@${sourceChannel}`;
               const entity = await client.getEntity(formattedUsername);
 
+              // بهتر شده: مقایسه دقیق‌تر
               const entityIdStr = entity.id?.toString() || String(entity.id);
               const channelIdStr = channelId?.toString() || String(channelId);
 
@@ -131,54 +122,24 @@ async function createUserEventHandler(userId, services, client) {
           }
 
           if (isFromThisServiceSource && matchedSourceChannelIds.length > 0) {
-            // بررسی تکرار پیام
-            const messageKey = `${serviceId}_${message.id}`;
-            const now = Date.now();
-
-            // بررسی اینکه آیا این پیام در حال پردازش است
-            if (processingMessages.has(messageKey)) {
-              const processingTime = processingMessages.get(messageKey);
-              // اگر کمتر از 30 ثانیه پیش شروع شده، رد کن
-              if (now - processingTime < 30000) {
-                console.log(
-                  `🔄 Message ${message.id} is already being processed for service ${serviceId}, skipping`
-                );
-                continue;
-              } else {
-                // اگر بیش از 30 ثانیه پیش بوده، احتمالاً مشکلی پیش آمده، پاک کن
-                processingMessages.delete(messageKey);
-              }
-            }
-
-            // علامت‌گذاری پیام به عنوان در حال پردازش
-            processingMessages.set(messageKey, now);
-
             console.log(
               `🔄 Processing message for service ${serviceId}, isEdit: ${isEdit}`
             );
 
-            try {
-              await processMessage(
-                message,
-                isEdit,
-                matchedSourceChannelIds,
-                service,
-                client,
-                serviceData.genAI
-              );
-            } finally {
-              // حذف پیام از فهرست پردازش
-              processingMessages.delete(messageKey);
-            }
+            await processMessage(
+              message,
+              isEdit,
+              matchedSourceChannelIds,
+              service,
+              client,
+              serviceData.genAI
+            );
           }
         } catch (err) {
           console.error(
             `❌ Error processing message for service ${serviceId}:`,
             err
           );
-          // در صورت خطا هم پیام را از فهرست پردازش حذف کن
-          const messageKey = `${serviceId}_${message.id}`;
-          processingMessages.delete(messageKey);
         }
       }
     } catch (err) {
@@ -186,30 +147,6 @@ async function createUserEventHandler(userId, services, client) {
     }
   };
 }
-
-// تمیز کردن پیام‌های قدیمی از فهرست پردازش
-function cleanupProcessingMessages() {
-  const now = Date.now();
-  const expiredKeys = [];
-
-  for (const [key, timestamp] of processingMessages.entries()) {
-    // حذف پیام‌هایی که بیش از 5 دقیقه در فهرست پردازش هستند
-    if (now - timestamp > 300000) {
-      expiredKeys.push(key);
-    }
-  }
-
-  expiredKeys.forEach((key) => processingMessages.delete(key));
-
-  if (expiredKeys.length > 0) {
-    console.log(
-      `🧹 Cleaned up ${expiredKeys.length} expired processing messages`
-    );
-  }
-}
-
-// اجرای تمیزکاری هر 5 دقیقه
-setInterval(cleanupProcessingMessages, 5 * 60 * 1000);
 
 async function startForwardingService(service, client, geminiApiKey) {
   try {
@@ -287,7 +224,7 @@ async function startUserServices(userId) {
 
     const client = await getOrCreateClient(userId, user.telegram_session);
 
-    // متوقف کردن سرویس‌های قبلی
+    // متوقف کردن سرویس‌های قبلی برای جلوگیری از تداخل
     await stopUserServices(userId);
 
     // شروع همه سرویس‌ها
@@ -295,7 +232,7 @@ async function startUserServices(userId) {
       await startForwardingService(service, client, user.gemini_api_key);
     }
 
-    // تنظیم event handler برای همه سرویس‌ها
+    // بهتر شده: تنظیم event handler برای همه سرویس‌ها
     await setupUserEventHandlers(userId);
 
     // ارسال پیام‌های فعال‌سازی و شروع کپی تاریخچه
@@ -308,12 +245,9 @@ async function startUserServices(userId) {
         `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
       );
 
-      // کپی تاریخچه فقط برای سرویس‌های کپی - با تاخیر کوتاه
+      // کپی تاریخچه در صورت نیاز - فقط برای سرویس‌های کپی
       if (service.type === "copy" && service.copy_history) {
-        // تاخیر 2 ثانیه‌ای برای اطمینان از تنظیم کامل event handler
-        setTimeout(() => {
-          startCopyHistory(service, client, userId);
-        }, 2000);
+        await startCopyHistory(service, client, userId);
       }
     }
 
@@ -324,47 +258,65 @@ async function startUserServices(userId) {
   }
 }
 
-// بهتر شده: کپی تاریخچه با جلوگیری از تداخل
+// تابع جدید برای کپی تاریخچه
 async function startCopyHistory(service, client, userId) {
   const taskId = `${userId}_${service.id}`;
+  const serviceId = service.id; // اضافه شد برای خوانایی بهتر
+
+  // بررسی اجرای قبلی
+  const now = Date.now();
+  const lastRun = lastCopyHistoryRunTimestamp.get(serviceId);
+  if (lastRun && now - lastRun < MIN_INTERVAL_BETWEEN_COPY_HISTORY_RUNS) {
+    console.log(
+      `📚 Service ${serviceId}: History copy was run recently (at ${new Date(
+        lastRun
+      ).toISOString()}). Skipping to prevent duplication.`
+    );
+    return;
+  }
 
   if (copyHistoryTasks.has(taskId)) {
     const existingTask = copyHistoryTasks.get(taskId);
     if (existingTask.processing) {
       console.log(
-        `📚 Service ${service.id}: History copy task is already processing. Skipping.`
+        `📚 Service ${serviceId}: History copy task is already processing. Skipping.`
       );
       return;
     } else {
       console.warn(
-        `⚠️ Service ${service.id}: Found a non-processing task, overwriting.`
+        `⚠️ Service ${serviceId}: Found a non-processing task in copyHistoryTasks for task ID ${taskId}. Overwriting.`
       );
     }
   }
 
-  console.log(`📚 Service ${service.id}: Starting history copy processing.`);
+  console.log(
+    `📚 Service ${serviceId}: Starting history copy processing at ${new Date(
+      now
+    ).toISOString()}.`
+  );
 
   const task = {
     active: true,
     processing: true,
     cancel: () => {
-      console.log(`🛑 Cancelling copy history task for service ${service.id}`);
+      console.log(`🛑 Cancelling copy history task for service ${serviceId}`);
       task.active = false;
     },
   };
   copyHistoryTasks.set(taskId, task);
 
+  let historyCopySuccessful = false; // برای ردیابی موفقیت
+
   try {
+    // ... (بقیه کد تابع startCopyHistory از پاسخ قبلی، شامل واکشی پیام‌ها، حلقه پردازش و غیره)
+    // ... ( اطمینان حاصل کنید که sourceChannelEntity.id به جای sourceChannel.id استفاده شود اگر sourceChannel دیگر entity نیست)
+
     const sourceChannels = JSON.parse(service.source_channels);
     if (sourceChannels.length === 0) {
-      console.error(
-        `Service ${service.id} has no source channels for history copy.`
-      );
       throw new Error(
-        `Service ${service.id}: No source channel defined for copy history.`
+        `Service ${serviceId}: No source channel defined for copy history.`
       );
     }
-
     const sourceChannelUsername = sourceChannels[0];
     const sourceChannelEntity = await client.getEntity(
       sourceChannelUsername.startsWith("@")
@@ -373,40 +325,41 @@ async function startCopyHistory(service, client, userId) {
     );
 
     const userServices = activeServices.get(userId);
-    const serviceData = userServices?.get(service.id);
+    const serviceData = userServices?.get(serviceId);
 
     if (!serviceData) {
       console.log(
-        `⚠️ Service ${service.id} not found in active services during history copy.`
+        `⚠️ Service ${serviceId} not found in active services during history copy. Aborting task.`
       );
       task.active = false;
       return;
     }
 
-    if (!messageMaps.has(service.id)) {
+    if (!messageMaps.has(serviceId)) {
       console.warn(
-        `⚠️ Message map for service ${service.id} not found, initializing new one.`
+        `⚠️ Message map for service ${serviceId} not found. Initializing.`
       );
-      messageMaps.set(service.id, loadMessageMap(service.id));
+      messageMaps.set(serviceId, loadMessageMap(serviceId));
     }
 
     let messages = [];
     const limit = Math.min(parseInt(service.history_limit) || 100, 10000);
-    const startFromId = service.start_from_id
+    // ... (بقیه منطق واکشی پیام‌ها با limit، startFromId و غیره)
+    // ... (کد واکشی پیام‌ها مانند پاسخ قبلی)
+    const startFromIdStr = service.start_from_id
       ? service.start_from_id.toString().trim()
       : null;
     const copyDirection = service.copy_direction || "before";
     const historyDirection = service.history_direction || "newest";
 
     console.log(
-      `📊 Service ${service.id} History Copy Settings: limit=${limit}, startFromId=${startFromId}, copyDirection=${copyDirection}, historyDirection=${historyDirection}`
+      `📊 Service ${serviceId} History Copy Settings: limit=${limit}, startFromId=${startFromIdStr}, copyDirection=${copyDirection}, historyDirection=${historyDirection}`
     );
 
-    // دریافت پیام‌ها بر اساس تنظیمات
-    if (startFromId && !isNaN(parseInt(startFromId))) {
-      const offsetId = parseInt(startFromId);
+    if (startFromIdStr && !isNaN(parseInt(startFromIdStr))) {
+      const offsetId = parseInt(startFromIdStr);
       console.log(
-        `📍 Service ${service.id}: Getting messages from specific ID: ${offsetId}, direction: ${copyDirection}`
+        `📍 Service ${serviceId}: Getting messages from specific ID: ${offsetId}, direction: ${copyDirection}`
       );
       if (copyDirection === "after") {
         messages = await client.getMessages(sourceChannelEntity, {
@@ -416,17 +369,18 @@ async function startCopyHistory(service, client, userId) {
           reverse: true,
         });
       } else {
+        // 'before'
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
           offsetId: offsetId,
           addOffset: 0,
           reverse: false,
         });
-        messages.reverse();
+        if (messages.length > 0) messages.reverse();
       }
     } else {
       console.log(
-        `📍 Service ${service.id}: Getting messages by history direction: ${historyDirection}`
+        `📍 Service ${serviceId}: Getting messages by history direction: ${historyDirection}`
       );
       if (historyDirection === "oldest") {
         messages = await client.getMessages(sourceChannelEntity, {
@@ -434,25 +388,26 @@ async function startCopyHistory(service, client, userId) {
           reverse: true,
         });
       } else {
+        // 'newest'
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
           reverse: false,
         });
-        messages.reverse();
+        if (messages.length > 0) messages.reverse();
       }
     }
 
-    // حذف پیام‌های تکراری
     const uniqueMessages = [];
     const seenMessageIds = new Set();
     for (const message of messages) {
       if (message && message.id && !seenMessageIds.has(message.id)) {
+        // بررسی وجود message و message.id
         seenMessageIds.add(message.id);
         uniqueMessages.push(message);
       }
     }
     console.log(
-      `📨 Service ${service.id}: Found ${messages.length} messages, ${uniqueMessages.length} unique for history copy.`
+      `📨 Service ${serviceId}: Found ${messages.length} messages, ${uniqueMessages.length} unique for history copy.`
     );
 
     let copiedCount = 0;
@@ -461,76 +416,49 @@ async function startCopyHistory(service, client, userId) {
     for (let i = 0; i < uniqueMessages.length; i++) {
       if (!task.active) {
         console.log(
-          `🛑 Service ${service.id}: Copy history task cancelled during message loop.`
+          `🛑 Service ${serviceId}: Copy history task cancelled during message loop.`
         );
         break;
       }
-
       const message = uniqueMessages[i];
-
       try {
-        // بررسی تکرار برای کپی تاریخچه
-        const messageKey = `${service.id}_${message.id}`;
+        const forwardedDetails = await processMessage(
+          message,
+          false,
+          [sourceChannelEntity.id],
+          service,
+          client,
+          serviceData.genAI
+        );
 
-        // اگر پیام در حال پردازش است، رد کن
-        if (processingMessages.has(messageKey)) {
-          console.log(
-            `⏭️ History message ${message.id} is already being processed, skipping`
-          );
+        if (forwardedDetails && Object.keys(forwardedDetails).length > 0) {
+          copiedCount++;
+        } else {
           skippedInLoopCount++;
-          continue;
         }
-
-        // علامت‌گذاری به عنوان در حال پردازش
-        processingMessages.set(messageKey, Date.now());
-
-        try {
-          const forwardedDetails = await processMessage(
-            message,
-            false, // isEdit
-            [sourceChannelEntity.id],
-            service,
-            client,
-            serviceData.genAI
-          );
-
-          if (forwardedDetails && Object.keys(forwardedDetails).length > 0) {
-            copiedCount++;
-          } else {
-            skippedInLoopCount++;
-          }
-        } finally {
-          // حذف از فهرست پردازش
-          processingMessages.delete(messageKey);
-        }
-
-        // تاخیر بین پیام‌ها
         await new Promise((resolve) => setTimeout(resolve, 1000));
       } catch (err) {
         console.error(
-          `❌ Error processing historical message ${message.id} for service ${service.id}:`,
+          `❌ Error processing historical message ${message.id} for service ${serviceId}:`,
           err
         );
         skippedInLoopCount++;
-        // حذف از فهرست پردازش در صورت خطا
-        const messageKey = `${service.id}_${message.id}`;
-        processingMessages.delete(messageKey);
       }
     }
 
     console.log(
-      `✅ Service ${service.id}: History copy finished. Copied: ${copiedCount}, Skipped: ${skippedInLoopCount}.`
+      `✅ Service ${serviceId}: History copy loop finished. Copied: ${copiedCount}, Skipped in loop: ${skippedInLoopCount}.`
     );
-
     if (task.active) {
       await sendNotificationToUser(
         client,
         `✅ کپی تاریخچه سرویس "${service.name}" تکمیل شد\n📊 کپی شده: ${copiedCount}, رد شده: ${skippedInLoopCount}`
       );
+      historyCopySuccessful = true; // <--- علامت‌گذاری موفقیت
     }
   } catch (err) {
     console.error(
-      `❌ Service ${service.id}: Critical error during history copy:`,
+      `❌ Service ${serviceId}: Critical error during history copy:`,
       err
     );
     if (client && service) {
@@ -545,8 +473,14 @@ async function startCopyHistory(service, client, userId) {
       copyHistoryTasks.delete(taskId);
     }
     console.log(
-      `🏁 Service ${service.id}: Finished history copy task execution.`
+      `🏁 Service ${serviceId}: Finished history copy task execution.`
     );
+    if (historyCopySuccessful) {
+      lastCopyHistoryRunTimestamp.set(serviceId, Date.now()); // <--- ثبت زمان اجرای موفقیت‌آمیز
+      console.log(
+        `⏱️ Service ${serviceId}: Updated last successful run timestamp for history copy.`
+      );
+    }
   }
 }
 
@@ -560,8 +494,11 @@ async function setupUserEventHandlers(userId) {
 
     const client = await getOrCreateClient(userId);
 
-    // بهتر شده: حذف کامل event handler های قبلی
-    await cleanupUserEventHandlers(userId);
+    // حذف event handler های قبلی
+    const existingHandlers = userEventHandlers.get(userId) || [];
+    for (const handler of existingHandlers) {
+      client.removeEventHandler(handler);
+    }
 
     // جمع‌آوری همه source channel ها برای سرویس‌های فعال
     const allSourceChannelIds = new Set();
@@ -591,6 +528,7 @@ async function setupUserEventHandlers(userId) {
         client
       );
 
+      // بهتر شده: از Raw event استفاده کن که همه update type ها رو handle کنه
       client.addEventHandler(
         eventHandler,
         new Raw({
@@ -626,30 +564,17 @@ async function stopService(userId, serviceId) {
       console.log(`🛑 Copy history task cancelled for service ${serviceId}`);
     }
 
-    // پاک کردن پیام‌های در حال پردازش این سرویس
-    const keysToDelete = [];
-    for (const [key] of processingMessages.entries()) {
-      if (key.startsWith(`${serviceId}_`)) {
-        keysToDelete.push(key);
-      }
-    }
-    keysToDelete.forEach((key) => processingMessages.delete(key));
-
-    if (keysToDelete.length > 0) {
-      console.log(
-        `🧹 Cleaned up ${keysToDelete.length} processing messages for service ${serviceId}`
-      );
-    }
-
     const userServices = activeServices.get(userId);
     if (userServices && userServices.has(serviceId)) {
       const serviceData = userServices.get(serviceId);
 
+      // متوقف کردن cleanup interval
       if (serviceData.cleanupInterval) {
         clearInterval(serviceData.cleanupInterval);
         console.log(`⏹️ Cleanup interval stopped for service ${serviceId}`);
       }
 
+      // ذخیره و پاک کردن message map
       const messageMap = messageMaps.get(serviceId);
       if (messageMap) {
         cleanExpiredMessages(serviceId);
@@ -660,9 +585,12 @@ async function stopService(userId, serviceId) {
         );
       }
 
+      // حذف سرویس از فهرست فعال
       userServices.delete(serviceId);
+      lastCopyHistoryRunTimestamp.delete(serviceId);
       console.log(`✅ Service ${serviceId} removed from active services`);
 
+      // اگر هیچ سرویسی برای این کاربر نمونده، event handler رو هم پاک کن
       if (userServices.size === 0) {
         console.log(
           `🧹 No more services for user ${userId}, cleaning up event handlers`
@@ -670,6 +598,7 @@ async function stopService(userId, serviceId) {
         activeServices.delete(userId);
         await cleanupUserEventHandlers(userId);
       } else {
+        // اگر هنوز سرویس‌های دیگه‌ای برای این کاربر هست، event handler رو دوباره تنظیم کن
         console.log(`🔄 Restarting remaining services for user ${userId}`);
         await setupUserEventHandlers(userId);
       }
@@ -690,15 +619,8 @@ async function cleanupUserEventHandlers(userId) {
     if (eventHandlers.length > 0) {
       const client = await getOrCreateClient(userId);
       for (const handler of eventHandlers) {
-        try {
-          client.removeEventHandler(handler);
-          console.log(`🔌 Event handler removed for user ${userId}`);
-        } catch (err) {
-          console.error(
-            `❌ Error removing event handler for user ${userId}:`,
-            err
-          );
-        }
+        client.removeEventHandler(handler);
+        console.log(`🔌 Event handler removed for user ${userId}`);
       }
       userEventHandlers.delete(userId);
     }
@@ -721,30 +643,21 @@ async function stopUserServices(userId) {
       }
     }
 
+    // حذف task ها از فهرست
     tasksToCancel.forEach((taskId) => {
       copyHistoryTasks.delete(taskId);
       console.log(`🛑 Copy history task ${taskId} cancelled`);
     });
 
-    // پاک کردن پیام‌های در حال پردازش این کاربر
+    const userServicesMap = activeServices.get(userId);
+    if (userServicesMap) {
+      for (const serviceId of userServicesMap.keys()) {
+        lastCopyHistoryRunTimestamp.delete(serviceId); // <--- اضافه شد
+      }
+    }
+
     const userServices = activeServices.get(userId);
     if (userServices) {
-      const keysToDelete = [];
-      for (const serviceId of userServices.keys()) {
-        for (const [key] of processingMessages.entries()) {
-          if (key.startsWith(`${serviceId}_`)) {
-            keysToDelete.push(key);
-          }
-        }
-      }
-      keysToDelete.forEach((key) => processingMessages.delete(key));
-
-      if (keysToDelete.length > 0) {
-        console.log(
-          `🧹 Cleaned up ${keysToDelete.length} processing messages for user ${userId}`
-        );
-      }
-
       // Stop all services
       for (const [serviceId, serviceData] of userServices.entries()) {
         if (serviceData.cleanupInterval) {
@@ -801,7 +714,7 @@ async function initializeAllServices() {
 module.exports = {
   activeServices,
   userEventHandlers,
-  copyHistoryTasks,
+  copyHistoryTasks, // export کردن copyHistoryTasks
   startForwardingService,
   startUserServices,
   stopService,
