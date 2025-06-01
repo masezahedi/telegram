@@ -38,7 +38,10 @@ export async function GET(request) {
         useAI: Boolean(service.prompt_template),
         type: service.type || "forward",
         copy_history: Boolean(service.copy_history),
-        history_limit: service.history_limit || 100,
+        history_limit: service.history_limit ?? 100, // استفاده از ?? به جای ||
+        history_direction: service.history_direction ?? "newest", // استفاده از ?? به جای ||
+        start_from_id: service.start_from_id, // بدون مقدار پیش‌فرض
+        copy_direction: service.copy_direction ?? "before", // استفاده از ?? به جای ||
       })),
     });
   } catch (error) {
@@ -84,21 +87,24 @@ export async function POST(request) {
     const db = await openDb();
     const result = await db.run(
       `
-      INSERT INTO forwarding_services (
-        id,
-        user_id,
-        name,
-        type,
-        source_channels,
-        target_channels,
-        search_replace_rules,
-        prompt_template,
-        copy_history,
-        history_limit,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `,
+  INSERT INTO forwarding_services (
+    id,
+    user_id,
+    name,
+    type,
+    source_channels,
+    target_channels,
+    search_replace_rules,
+    prompt_template,
+    copy_history,
+    history_limit,
+    history_direction,
+    start_from_id,
+    copy_direction,
+    created_at,
+    updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`,
       [
         Date.now().toString(),
         decoded.userId,
@@ -110,6 +116,9 @@ export async function POST(request) {
         useAI ? promptTemplate : null,
         copyHistory ? 1 : 0,
         historyLimit,
+        historyDirection, // اضافه شده
+        startFromId, // اضافه شده
+        copyDirection, // اضافه شده
       ]
     );
 
