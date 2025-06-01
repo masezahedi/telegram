@@ -21,7 +21,13 @@ async function sendNotificationToUser(client, message) {
 }
 
 // Send new message
-async function sendNewMessage(message, finalText, targetChannel, hasValidMedia, client) {
+async function sendNewMessage(
+  message,
+  finalText,
+  targetChannel,
+  hasValidMedia,
+  client
+) {
   try {
     let sentMessage;
 
@@ -60,10 +66,10 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
 
     if (!message) {
       console.log(`⛔ Service ${serviceId}: Empty message`);
-      return;
+      return null; // بازگشت null برای خطا
     }
 
-    // بهتر شده: دقیق‌تر channel ID رو استخراج کن
+    // استخراج channelId
     let channelId = null;
     if (message.peerId?.channelId) {
       channelId = message.peerId.channelId;
@@ -75,52 +81,49 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
 
     if (!channelId) {
       console.log(`⛔ Service ${serviceId}: No channel ID found`);
-      return;
+      return null;
     }
 
-    // بهتر شده: دقیق‌تر بررسی کن که از source channel هست یا نه
+    // بررسی source channel
     const isFromSourceChannel = sourceChannelIds.some(sourceId => {
-      // Handle different ID types (BigInt, Number, String)
       const sourceIdStr = sourceId?.toString?.() || String(sourceId);
       const channelIdStr = channelId?.toString?.() || String(channelId);
-      
-      // Try multiple comparison methods
-      return sourceIdStr === channelIdStr || 
-             sourceId?.value?.toString() === channelId?.value?.toString() ||
-             Math.abs(sourceId) === Math.abs(channelId);
+      return sourceIdStr === channelIdStr ||
+        sourceId?.value?.toString() === channelId?.value?.toString() ||
+        Math.abs(sourceId) === Math.abs(channelId);
     });
 
     if (!isFromSourceChannel) {
       console.log(`⛔ Service ${serviceId}: Message from non-source channel ignored`);
-      console.log(`Channel ID: ${channelId}, Source IDs: ${sourceChannelIds.map(id => id.toString())}`);
-      return;
+      return null;
     }
 
     const originalText = message.message || message.caption;
-    const hasMedia = message.media && 
-      message.media.className !== "MessageMediaEmpty" && 
+    const hasMedia = message.media &&
+      message.media.className !== "MessageMediaEmpty" &&
       message.media.className !== "MessageMediaWebPage";
 
     if (!originalText && !hasMedia) {
       console.log(`⛔ Service ${serviceId}: Message without text and media ignored`);
-      return;
+      return null;
     }
 
-    // Handle message mapping - بهتر شده
+    // مدیریت messageMap
     const messageMap = messageMaps.get(serviceId) || new Map();
-    if (!messageMaps.has(serviceId)) {
-      messageMaps.set(serviceId, messageMap);
-    }
-
-    // بهتر شده: دقیق‌تر message key بساز
     const messageKey = `${channelId.toString()}_${message.id}`;
     const currentTime = Date.now();
 
     console.log(`📝 Processing message: ${messageKey}, isEdit: ${isEdit}`);
 
+    // اگر پیام قبلاً پردازش شده، از ارسال مجدد جلوگیری کن
+    if (messageMap.has(messageKey) {
+      console.log(`⏭️ Service ${serviceId}: Message already processed, skipping`);
+      return null;
+    }
+
     let processedText = originalText;
 
-    // Process with AI if enabled
+    // پردازش با AI (اگر فعال باشد)
     if (originalText && useAI && genAI) {
       try {
         console.log(`🤖 Service ${serviceId}: Processing with AI`);
@@ -132,11 +135,11 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
         console.log(`🤖 Service ${serviceId}: AI processing completed`);
       } catch (err) {
         console.error(`❌ Service ${serviceId}: AI Error:`, err);
-        processedText = originalText; // Fallback to original text
+        processedText = originalText;
       }
     }
 
-    // Apply search/replace rules
+    // اعمال قواعد جستجو/جایگزینی
     if (processedText && searchReplaceRules?.length > 0) {
       for (const rule of searchReplaceRules) {
         if (rule.search && rule.replace) {
@@ -148,125 +151,57 @@ async function processMessage(message, isEdit, sourceChannelIds, service, client
       }
     }
 
-    // Send to target channels
+    // ارسال به کانال‌های مقصد
+    const forwardedMessages = {}; // ذخیره پیام‌های فوروارد شده
+
     for (const targetUsername of targetChannels) {
       try {
-        const formattedUsername = targetUsername.startsWith("@") 
-          ? targetUsername 
+        const formattedUsername = targetUsername.startsWith("@")
+          ? targetUsername
           : `@${targetUsername}`;
         const targetEntity = await client.getEntity(formattedUsername);
 
-        if (isEdit && messageMap.has(messageKey)) {
-          // ادیت کردن پیام موجود
-          const existingMessage = messageMap.get(messageKey);
-          console.log(`🔄 Service ${serviceId}: Editing existing message for ${targetUsername}`);
-          console.log(`Existing message data:`, existingMessage);
+        // ارسال پیام جدید (حتی برای ویرایش، اگر پیام هدف وجود نداشته باشد)
+        console.log(`📤 Service ${serviceId}: Sending message to ${targetUsername}`);
+        const sentMessage = await sendNewMessage(
+          message,
+          processedText,
+          targetEntity,
+          hasMedia,
+          client
+        );
 
-          // بهتر شده: دقیق‌تر target message ID رو پیدا کن
-          const targetMessageId = existingMessage.targetMessageIds?.[targetUsername];
-
-          if (targetMessageId) {
-            try {
-              console.log(`✏️ Service ${serviceId}: Attempting to edit message ${targetMessageId} in ${targetUsername}`);
-              
-              await client.editMessage(targetEntity, {
-                message: parseInt(targetMessageId),
-                text: processedText,
-                parseMode: "html",
-              });
-
-              console.log(`✅ Service ${serviceId}: Message edited successfully in ${targetUsername}`);
-
-              // Update timestamp
-              existingMessage.timestamp = currentTime;
-              messageMap.set(messageKey, existingMessage);
-              
-            } catch (editError) {
-              console.error(`❌ Edit error in ${targetUsername}:`, editError.message);
-              
-              // اگر ادیت نشد، پیام جدید بفرست
-              console.log(`🔄 Service ${serviceId}: Sending new message instead of editing`);
-              const sentMessage = await sendNewMessage(
-                message,
-                processedText,
-                targetEntity,
-                hasMedia,
-                client
-              );
-              
-              if (sentMessage) {
-                // بهتر شده: درست update کن
-                if (!existingMessage.targetMessageIds) {
-                  existingMessage.targetMessageIds = {};
-                }
-                existingMessage.targetMessageIds[targetUsername] = sentMessage.id.toString();
-                existingMessage.timestamp = currentTime;
-                messageMap.set(messageKey, existingMessage);
-                console.log(`📝 Service ${serviceId}: Updated message mapping for ${targetUsername}`);
-              }
-            }
-          } else {
-            console.log(`⚠️ Service ${serviceId}: No target message ID found for ${targetUsername}, sending new message`);
-            // اگر target message ID نداریم، پیام جدید بفرست
-            const sentMessage = await sendNewMessage(
-              message,
-              processedText,
-              targetEntity,
-              hasMedia,
-              client
-            );
-            
-            if (sentMessage) {
-              // بهتر شده: اگر existingMessage وجود داره ولی targetMessageIds نداره
-              if (!existingMessage.targetMessageIds) {
-                existingMessage.targetMessageIds = {};
-              }
-              existingMessage.targetMessageIds[targetUsername] = sentMessage.id.toString();
-              existingMessage.timestamp = currentTime;
-              messageMap.set(messageKey, existingMessage);
-            }
-          }
-        } else {
-          // پیام جدید بفرست
-          console.log(`📤 Service ${serviceId}: Sending new message to ${targetUsername}`);
-          const sentMessage = await sendNewMessage(
-            message,
-            processedText,
-            targetEntity,
-            hasMedia,
-            client
-          );
-          
-          if (sentMessage) {
-            // بهتر شده: درست message mapping رو ذخیره کن
-            const messageData = {
-              targetMessageIds: {
-                [targetUsername]: sentMessage.id.toString()
-              },
-              timestamp: currentTime,
-              originalChannelId: channelId.toString(),
-              originalMessageId: message.id
-            };
-            
-            messageMap.set(messageKey, messageData);
-            console.log(`📝 Service ${serviceId}: Saved message mapping: ${messageKey} -> ${sentMessage.id}`);
-          }
+        if (sentMessage) {
+          forwardedMessages[targetUsername] = sentMessage.id.toString();
+          console.log(`✅ Service ${serviceId}: Message sent to ${targetUsername} (ID: ${sentMessage.id})`);
         }
       } catch (err) {
         console.error(`❌ Error sending to ${targetUsername}:`, err);
       }
     }
 
-    // ذخیره message map
-    saveMessageMap(serviceId, messageMap);
-    console.log(`💾 Service ${serviceId}: Message map saved`);
+    // ذخیره در messageMaps فقط اگر پیام‌ها با موفقیت ارسال شدند
+    if (Object.keys(forwardedMessages).length > 0) {
+      const messageData = {
+        targetMessageIds: forwardedMessages,
+        timestamp: currentTime,
+        originalChannelId: channelId.toString(),
+        originalMessageId: message.id
+      };
+      messageMap.set(messageKey, messageData);
+      messageMaps.set(serviceId, messageMap);
+      console.log(`💾 Service ${serviceId}: Message mapping saved`);
+    }
+
+    return forwardedMessages; // بازگرداندن پیام‌های فوروارد شده
 
   } catch (err) {
     console.error(`❌ Service ${service.id}: Message processing error:`, err);
+    return null;
   }
 }
 
 module.exports = {
   processMessage,
-  sendNotificationToUser
+  sendNotificationToUser,
 };

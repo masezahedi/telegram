@@ -257,20 +257,17 @@ async function startUserServices(userId) {
 }
 
 // تابع جدید برای کپی تاریخچه
-// Fixed startCopyHistory function - رفع مشکل کپی دوبرابر و پردازش تنظیمات
 async function startCopyHistory(service, client, userId) {
   console.log(`📚 Service ${service.id}: Starting history copy`);
 
   try {
     const sourceChannels = JSON.parse(service.source_channels);
-    // فقط اولین کانال رو برای کپی استفاده می‌کنیم
     const sourceChannel = await client.getEntity(
       sourceChannels[0].startsWith("@")
         ? sourceChannels[0]
         : `@${sourceChannels[0]}`
     );
 
-    // Create a new copy history task برای کنترل متوقف کردن
     const taskId = `${userId}_${service.id}`;
     const task = {
       active: true,
@@ -283,13 +280,12 @@ async function startCopyHistory(service, client, userId) {
     };
     copyHistoryTasks.set(taskId, task);
 
-    // تنظیمات تاریخچه - با مقادیر پیش‌فرض صحیح
     const historyDirection = service.history_direction || "newest";
     const startFromId = service.start_from_id
       ? service.start_from_id.toString().trim()
       : null;
     const copyDirection = service.copy_direction || "before";
-    const limit = Math.min(parseInt(service.history_limit) || 100, 10000); // محدود به 10000
+    const limit = Math.min(parseInt(service.history_limit) || 100, 10000);
 
     console.log(
       `📊 Copy settings: direction=${historyDirection}, limit=${limit}, startFromId=${startFromId}, copyDirection=${copyDirection}`
@@ -298,68 +294,43 @@ async function startCopyHistory(service, client, userId) {
     let messages = [];
 
     if (startFromId && !isNaN(parseInt(startFromId))) {
-      // اگر شناسه پیام مشخص شده، بر اساس آن پیام‌ها رو بگیر
       const offsetId = parseInt(startFromId);
       console.log(`📍 Getting messages from specific ID: ${offsetId}`);
 
       if (copyDirection === "after") {
-        // پیام‌های بعد از این شناسه (جدیدتر)
-        console.log(`📜 Fetching ${limit} messages AFTER ID ${offsetId}`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
           offsetId: offsetId,
-          addOffset: 1, // از پیام بعدی شروع کن
-          reverse: true, // از قدیم به جدید بگیر
+          addOffset: 1,
+          reverse: true,
         });
-        console.log(
-          `📨 Retrieved ${messages.length} messages after ID ${offsetId}`
-        );
       } else {
-        // پیام‌های قبل از این شناسه (قدیمی‌تر) - پیش‌فرض
-        console.log(`📜 Fetching ${limit} messages BEFORE ID ${offsetId}`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
           offsetId: offsetId,
-          addOffset: 0, // شامل خود پیام نشو
-          reverse: false, // از جدید به قدیم بگیر
+          addOffset: 0,
+          reverse: false,
         });
-        // معکوس کن تا از قدیم به جدید ارسال شوند
         messages.reverse();
-        console.log(
-          `📨 Retrieved ${messages.length} messages before ID ${offsetId}, reversed for chronological order`
-        );
       }
     } else {
-      // اگر شناسه مشخص نشده، بر اساس جهت تاریخچه
-      console.log(`📍 Getting messages by direction: ${historyDirection}`);
-
       if (historyDirection === "oldest") {
-        // قدیمی‌ترین پیام‌ها - از اول کانال
-        console.log(`📜 Fetching oldest ${limit} messages`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
-          reverse: true, // از قدیم به جدید
+          reverse: true,
         });
-        // پیام‌ها از قدیم به جدید آمده‌اند - نیازی به معکوس کردن نیست
-        console.log(`📨 Retrieved ${messages.length} oldest messages`);
       } else {
-        // جدیدترین پیام‌ها (پیش‌فرض) - از آخر کانال
-        console.log(`📜 Fetching newest ${limit} messages`);
         messages = await client.getMessages(sourceChannel, {
           limit: limit,
-          reverse: false, // از جدید به قدیم گرفته می‌شود
+          reverse: false,
         });
-        // پیام‌ها را معکوس کن تا از قدیم به جدید ارسال شوند
         messages.reverse();
-        console.log(
-          `📨 Retrieved ${messages.length} newest messages, reversed for chronological order`
-        );
       }
     }
 
     console.log(`📨 Total messages found: ${messages.length}`);
 
-    // بررسی اینکه پیام‌های یکتا باشند و حذف تکراری‌ها
+    // حذف پیام‌های تکراری
     const uniqueMessages = [];
     const seenMessageIds = new Set();
 
@@ -367,21 +338,8 @@ async function startCopyHistory(service, client, userId) {
       if (!seenMessageIds.has(message.id)) {
         seenMessageIds.add(message.id);
         uniqueMessages.push(message);
-        console.log(
-          `📝 Message ${message.id}: ${message.date} - "${
-            message.message
-              ? message.message.substring(0, 50) + "..."
-              : "Media message"
-          }"`
-        );
-      } else {
-        console.log(`⚠️ Duplicate message found and skipped: ${message.id}`);
       }
     }
-
-    console.log(
-      `📨 Processing ${uniqueMessages.length} unique messages in chronological order`
-    );
 
     const userServices = activeServices.get(userId);
     const serviceData = userServices?.get(service.id);
@@ -392,88 +350,73 @@ async function startCopyHistory(service, client, userId) {
       return;
     }
 
-    // کپی پیام‌ها یکی یکی با تاخیر
     let copiedCount = 0;
     let skippedCount = 0;
 
     for (let i = 0; i < uniqueMessages.length; i++) {
       const message = uniqueMessages[i];
 
-      // بررسی که آیا task هنوز فعال است
       if (!copyHistoryTasks.get(taskId)?.active) {
         console.log(`🛑 Service ${service.id}: Copy history task cancelled`);
         break;
       }
 
-      console.log(
-        `📤 Processing message ${i + 1}/${uniqueMessages.length} - ID: ${
-          message.id
-        }, Date: ${message.date}`
-      );
-
       try {
-        // بررسی که پیام محتوا دارد
         if (message.message || message.media) {
-          await processMessage(
-            message,
-            false, // isEdit = false برای تاریخچه
-            [sourceChannel.id],
-            service,
-            client,
-            serviceData.genAI
-          );
-          copiedCount++;
-          console.log(`✅ Message ${message.id} copied successfully`);
+          // ذخیره پیام در messageMaps قبل از ارسال
+          const messageMap = messageMaps.get(service.id) || new Map();
+          if (!messageMap.has(message.id)) {
+            const forwardedMessage = await processMessage(
+              message,
+              false,
+              [sourceChannel.id],
+              service,
+              client,
+              serviceData.genAI
+            );
 
-          // تاخیر بین پیام‌ها برای جلوگیری از محدودیت تلگرام
-          // تاخیر کمتر برای پیام‌های کم و بیشتر برای پیام‌های زیاد
-          const delay = Math.min(1000 + copiedCount * 100, 3000);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+            // ذخیره ID پیام فوروارد شده
+            if (forwardedMessage && forwardedMessage.id) {
+              messageMap.set(message.id, {
+                forwardedId: forwardedMessage.id,
+                timestamp: Date.now(),
+              });
+              messageMaps.set(service.id, messageMap);
+              console.log(
+                `✅ Message ${message.id} copied and saved in messageMaps`
+              );
+            }
+          } else {
+            console.log(`⏭️ Message ${message.id} already copied, skipping`);
+            skippedCount++;
+            continue;
+          }
+
+          copiedCount++;
+          await new Promise((resolve) => setTimeout(resolve, 1000)); // تأخیر 1 ثانیه
         } else {
           skippedCount++;
-          console.log(`⏭️ Skipping empty message: ${message.id}`);
         }
       } catch (err) {
         console.error(`❌ Error processing message ${message.id}:`, err);
         skippedCount++;
-        // ادامه با پیام بعدی در صورت خطا
       }
     }
 
-    // پاک کردن task از فهرست
     copyHistoryTasks.delete(taskId);
     console.log(`✅ Service ${service.id}: History copy completed`);
-    console.log(
-      `📊 Statistics - Copied: ${copiedCount}, Skipped: ${skippedCount}, Total: ${uniqueMessages.length}`
-    );
 
-    // ارسال پیام اتمام کپی با جزئیات
-    const completionMessage = `✅ کپی تاریخچه سرویس "${
-      service.name
-    }" با موفقیت تکمیل شد
-📊 آمار کپی:
-• پیام‌های کپی شده: ${copiedCount}
-• پیام‌های رد شده: ${skippedCount}
-• مجموع پیام‌های پردازش شده: ${uniqueMessages.length}
-⏰ ${new Date().toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}`;
-
+    // ارسال پیام اتمام کار
+    const completionMessage = `✅ کپی تاریخچه سرویس "${service.name}" تکمیل شد\n📊 کپی شده: ${copiedCount}, رد شده: ${skippedCount}`;
     await sendNotificationToUser(client, completionMessage);
   } catch (err) {
     console.error(`❌ Service ${service.id}: History copy error:`, err);
-
-    // پاک کردن task در صورت خطا
     const taskId = `${userId}_${service.id}`;
     copyHistoryTasks.delete(taskId);
-
-    // ارسال پیام خطا
-    try {
-      await sendNotificationToUser(
-        client,
-        `❌ خطا در کپی تاریخچه سرویس "${service.name}": ${err.message}`
-      );
-    } catch (notifErr) {
-      console.error(`❌ Failed to send error notification:`, notifErr);
-    }
+    await sendNotificationToUser(
+      client,
+      `❌ خطا در کپی تاریخچه: ${err.message}`
+    );
   }
 }
 
