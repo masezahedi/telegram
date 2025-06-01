@@ -141,19 +141,21 @@ export default function ForwardingServiceList({ onUpdate }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>نام سرویس</TableHead>
-                <TableHead>نوع سرویس</TableHead>
-                <TableHead>کانال‌های مبدا</TableHead>
-                <TableHead>کانال‌های مقصد</TableHead>
-                <TableHead>وضعیت</TableHead>
-                <TableHead>عملیات</TableHead>
+                <TableHead className="text-right">نام سرویس</TableHead>
+                <TableHead className="text-right">نوع سرویس</TableHead>
+                <TableHead className="text-right">کانال‌های مبدا</TableHead>
+                <TableHead className="text-right">کانال‌های مقصد</TableHead>
+                <TableHead className="text-right">وضعیت</TableHead>
+                <TableHead className="text-right">عملیات</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {services.map((service) => (
                 <TableRow key={service.id}>
-                  <TableCell className="font-medium">{service.name}</TableCell>
-                  <TableCell>
+                  <TableCell className="text-right font-medium">
+                    {service.name}
+                  </TableCell>
+                  <TableCell className="text-right">
                     <Badge
                       variant={
                         service.type === "copy" ? "secondary" : "default"
@@ -162,9 +164,13 @@ export default function ForwardingServiceList({ onUpdate }) {
                       {service.type === "copy" ? "کپی کانال" : "فوروارد خودکار"}
                     </Badge>
                   </TableCell>
-                  <TableCell>{service.source_channels.join(", ")}</TableCell>
-                  <TableCell>{service.target_channels.join(", ")}</TableCell>
-                  <TableCell>
+                  <TableCell className="text-right">
+                    {service.source_channels.join(", ")}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {service.target_channels.join(", ")}
+                  </TableCell>
+                  <TableCell className="text-right">
                     <Switch
                       checked={service.is_active}
                       onCheckedChange={(checked) =>
@@ -172,8 +178,8 @@ export default function ForwardingServiceList({ onUpdate }) {
                       }
                     />
                   </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
+                  <TableCell className="text-right">
+                    <div className="flex gap-2 justify-end">
                       <Button
                         variant="ghost"
                         size="icon"

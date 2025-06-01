@@ -26,6 +26,7 @@ import {
   FormMessage,
   FormDescription,
 } from "@/components/ui/form";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
@@ -50,7 +51,10 @@ const formSchema = z.object({
     })
   ),
   copyHistory: z.boolean().default(false),
-  historyLimit: z.number().min(0).max(1000).optional(),
+  historyLimit: z.number().min(1).max(10000).optional(),
+  historyDirection: z.enum(["newest", "oldest"]).optional(),
+  startFromId: z.string().optional(),
+  copyDirection: z.enum(["before", "after"]).optional(),
 });
 
 export default function ForwardingServiceForm({ service, onSuccess }) {
@@ -72,6 +76,9 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
       ],
       copyHistory: service?.copy_history || false,
       historyLimit: service?.history_limit || 100,
+      historyDirection: service?.history_direction || "newest",
+      startFromId: service?.start_from_id || "",
+      copyDirection: service?.copy_direction || "before",
     },
   });
 
@@ -104,7 +111,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     try {
       const cleanedValues = {
         ...values,
-        type: values.type, // Ensure type is included
+        type: values.type,
         sourceChannels: values.sourceChannels.filter(Boolean),
         targetChannels: values.targetChannels.filter(Boolean),
         searchReplaceRules: values.searchReplaceRules.filter(
@@ -116,6 +123,10 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
           values.type === "copy" && values.copyHistory
             ? values.historyLimit
             : 100,
+        historyDirection:
+          values.type === "copy" ? values.historyDirection : null,
+        startFromId: values.type === "copy" ? values.startFromId : null,
+        copyDirection: values.type === "copy" ? values.copyDirection : null,
       };
 
       const result = service?.id
@@ -191,6 +202,8 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
 
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
+  const copyHistory = form.watch("copyHistory");
+  const startFromId = form.watch("startFromId");
 
   if (!isTelegramConnected) {
     return (
@@ -376,32 +389,126 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
               )}
             />
 
-            {form.watch("copyHistory") && (
-              <FormField
-                control={form.control}
-                name="historyLimit"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="1000"
-                        placeholder="تعداد پیام‌ها را وارد کنید"
-                        {...field}
-                        onChange={(e) =>
-                          field.onChange(parseInt(e.target.value, 10))
-                        }
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      حداکثر 1000 پیام قدیمی قابل کپی است
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            {copyHistory && (
+              <>
+                <FormField
+                  control={form.control}
+                  name="historyLimit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="10000"
+                          placeholder="تعداد پیام‌ها را وارد کنید"
+                          {...field}
+                          onChange={(e) =>
+                            field.onChange(parseInt(e.target.value, 10))
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        حداکثر 10000 پیام قابل کپی است
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="historyDirection"
+                  render={({ field }) => (
+                    <FormItem className="space-y-3">
+                      <FormLabel>ترتیب کپی پیام‌ها</FormLabel>
+                      <FormControl>
+                        <RadioGroup
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          className="flex flex-col space-y-1"
+                        >
+                          <FormItem className="flex items-center space-x-3 space-x-reverse">
+                            <FormControl>
+                              <RadioGroupItem value="newest" />
+                            </FormControl>
+                            <FormLabel className="font-normal">
+                              جدیدترین پیام‌ها
+                            </FormLabel>
+                          </FormItem>
+                          <FormItem className="flex items-center space-x-3 space-x-reverse">
+                            <FormControl>
+                              <RadioGroupItem value="oldest" />
+                            </FormControl>
+                            <FormLabel className="font-normal">
+                              قدیمی‌ترین پیام‌ها
+                            </FormLabel>
+                          </FormItem>
+                        </RadioGroup>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="space-y-4 border rounded-lg p-4">
+                  <FormLabel>کپی از پیام خاص (اختیاری)</FormLabel>
+                  <FormField
+                    control={form.control}
+                    name="startFromId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>شناسه پیام</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="شناسه پیام را وارد کنید"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {startFromId && (
+                    <FormField
+                      control={form.control}
+                      name="copyDirection"
+                      render={({ field }) => (
+                        <FormItem className="space-y-3">
+                          <FormLabel>جهت کپی</FormLabel>
+                          <FormControl>
+                            <RadioGroup
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                              className="flex flex-col space-y-1"
+                            >
+                              <FormItem className="flex items-center space-x-3 space-x-reverse">
+                                <FormControl>
+                                  <RadioGroupItem value="before" />
+                                </FormControl>
+                                <FormLabel className="font-normal">
+                                  پیام‌های قبل از این شناسه
+                                </FormLabel>
+                              </FormItem>
+                              <FormItem className="flex items-center space-x-3 space-x-reverse">
+                                <FormControl>
+                                  <RadioGroupItem value="after" />
+                                </FormControl>
+                                <FormLabel className="font-normal">
+                                  پیام‌های بعد از این شناسه
+                                </FormLabel>
+                              </FormItem>
+                            </RadioGroup>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              </>
             )}
           </>
         )}
