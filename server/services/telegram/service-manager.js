@@ -1,15 +1,14 @@
-// Fixed service-manager.js - بخش event handler
-const { Raw, NewMessage } = require("telegram/events");
-const { getOrCreateClient } = require("./client");
-const { processMessage, sendNotificationToUser } = require("./message-handler");
-const {
+import { Raw, NewMessage } from "telegram/events";
+import { getOrCreateClient } from "./client";
+import { processMessage, sendNotificationToUser } from "./message-handler";
+import {
   messageMaps,
   loadMessageMap,
   saveMessageMap,
   cleanExpiredMessages,
-} = require("./message-maps");
-
-const { openDb } = require("../../utils/db");
+} from "./message-maps";
+import { openDb } from "../../utils/db";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Store active services
 const activeServices = new Map();
@@ -18,7 +17,7 @@ const userEventHandlers = new Map();
 // Store copy history tasks
 const copyHistoryTasks = new Map();
 
-// بهتر شده: Event handler که هم new message و هم edit رو handle میکنه
+// Event handler that handles both new messages and edits
 async function createUserEventHandler(userId, services, client) {
   return async (update) => {
     try {
@@ -27,7 +26,7 @@ async function createUserEventHandler(userId, services, client) {
 
       console.log(`📡 Update received for user ${userId}: ${update.className}`);
 
-      // Extract message from update - بهتر شده
+      // Extract message from update
       if (update.className === "UpdateNewChannelMessage" && update.message) {
         message = update.message;
         isEdit = false;
@@ -57,7 +56,7 @@ async function createUserEventHandler(userId, services, client) {
         return;
       }
 
-      // بهتر شده: دقیق‌تر channel ID استخراج کن
+      // Extract channel ID more accurately
       let channelId = null;
       if (message.peerId?.channelId) {
         channelId = message.peerId.channelId;
@@ -82,7 +81,6 @@ async function createUserEventHandler(userId, services, client) {
           const service = serviceData.service;
           const sourceChannels = JSON.parse(service.source_channels);
 
-          // بهتر شده: دقیق‌تر بررسی کن که از source channel این سرویس هست یا نه
           let isFromThisServiceSource = false;
           const matchedSourceChannelIds = [];
 
@@ -93,7 +91,6 @@ async function createUserEventHandler(userId, services, client) {
                 : `@${sourceChannel}`;
               const entity = await client.getEntity(formattedUsername);
 
-              // بهتر شده: مقایسه دقیق‌تر
               const entityIdStr = entity.id?.toString() || String(entity.id);
               const channelIdStr = channelId?.toString() || String(channelId);
 
@@ -158,7 +155,6 @@ async function startForwardingService(service, client, geminiApiKey) {
     // Initialize Gemini if needed
     let genAI = null;
     if (service.prompt_template && geminiApiKey) {
-      const { GoogleGenerativeAI } = require("@google/generative-ai");
       genAI = new GoogleGenerativeAI(geminiApiKey);
       console.log(`🤖 Service ${serviceId}: Initialized Gemini AI`);
     }
@@ -222,18 +218,14 @@ async function startUserServices(userId) {
 
     const client = await getOrCreateClient(userId, user.telegram_session);
 
-    // متوقف کردن سرویس‌های قبلی برای جلوگیری از تداخل
     await stopUserServices(userId);
 
-    // شروع همه سرویس‌ها
     for (const service of services) {
       await startForwardingService(service, client, user.gemini_api_key);
     }
 
-    // بهتر شده: تنظیم event handler برای همه سرویس‌ها
     await setupUserEventHandlers(userId);
 
-    // ارسال پیام‌های فعال‌سازی و شروع کپی تاریخچه
     for (const service of services) {
       const activationTime = new Date().toLocaleString("fa-IR", {
         timeZone: "Asia/Tehran",
@@ -243,7 +235,6 @@ async function startUserServices(userId) {
         `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
       );
 
-      // کپی تاریخچه در صورت نیاز
       if (service.type === "copy" && service.copy_history) {
         console.log(`📚 Service ${service.id}: Starting history copy`);
         try {
@@ -254,7 +245,6 @@ async function startUserServices(userId) {
               : `@${sourceChannels[0]}`
           );
 
-          // Create a new copy history task
           const taskId = `${userId}_${service.id}`;
           const task = {
             active: true,
@@ -271,7 +261,6 @@ async function startUserServices(userId) {
 
           let messages;
           if (startFromId) {
-            // Get messages based on specific message ID
             const offsetId = parseInt(startFromId);
             messages = await client.getMessages(sourceChannel, {
               limit: limit,
@@ -280,7 +269,6 @@ async function startUserServices(userId) {
               addOffset: copyDirection === "after" ? 1 : 0,
             });
           } else {
-            // Get messages based on history direction
             messages = await client.getMessages(sourceChannel, {
               limit: limit,
               reverse: historyDirection === "oldest",
@@ -291,7 +279,6 @@ async function startUserServices(userId) {
           const serviceData = userServices.get(service.id);
 
           for (const message of messages) {
-            // Check if the task is still active
             if (!copyHistoryTasks.get(taskId)?.active) {
               console.log(
                 `🛑 Service ${service.id}: Copy history task cancelled`
@@ -310,7 +297,6 @@ async function startUserServices(userId) {
             await new Promise((resolve) => setTimeout(resolve, 2000));
           }
 
-          // Clean up the task
           copyHistoryTasks.delete(taskId);
           console.log(`✅ Service ${service.id}: History copy completed`);
         } catch (err) {
@@ -336,13 +322,11 @@ async function setupUserEventHandlers(userId) {
 
     const client = await getOrCreateClient(userId);
 
-    // حذف event handler های قبلی
     const existingHandlers = userEventHandlers.get(userId) || [];
     for (const handler of existingHandlers) {
       client.removeEventHandler(handler);
     }
 
-    // جمع‌آوری همه source channel ها برای سرویس‌های فعال
     const allSourceChannelIds = new Set();
     for (const [serviceId, serviceData] of userServices.entries()) {
       const sourceChannels = JSON.parse(serviceData.service.source_channels);
@@ -362,7 +346,6 @@ async function setupUserEventHandlers(userId) {
       }
     }
 
-    // ایجاد event handler جدید
     if (allSourceChannelIds.size > 0) {
       const eventHandler = await createUserEventHandler(
         userId,
@@ -370,7 +353,6 @@ async function setupUserEventHandlers(userId) {
         client
       );
 
-      // بهتر شده: از Raw event استفاده کن که همه update type ها رو handle کنه
       client.addEventHandler(
         eventHandler,
         new Raw({
@@ -397,7 +379,6 @@ async function stopService(userId, serviceId) {
   try {
     console.log(`🛑 Stopping service ${serviceId} for user ${userId}`);
 
-    // Cancel any ongoing copy history task
     const taskId = `${userId}_${serviceId}`;
     const copyTask = copyHistoryTasks.get(taskId);
     if (copyTask) {
@@ -410,13 +391,11 @@ async function stopService(userId, serviceId) {
     if (userServices && userServices.has(serviceId)) {
       const serviceData = userServices.get(serviceId);
 
-      // متوقف کردن cleanup interval
       if (serviceData.cleanupInterval) {
         clearInterval(serviceData.cleanupInterval);
         console.log(`⏹️ Cleanup interval stopped for service ${serviceId}`);
       }
 
-      // ذخیره و پاک کردن message map
       const messageMap = messageMaps.get(serviceId);
       if (messageMap) {
         cleanExpiredMessages(serviceId);
@@ -427,11 +406,9 @@ async function stopService(userId, serviceId) {
         );
       }
 
-      // حذف سرویس از فهرست فعال
       userServices.delete(serviceId);
       console.log(`✅ Service ${serviceId} removed from active services`);
 
-      // اگر هیچ سرویسی برای این کاربر نمونده، event handler رو هم پاک کن
       if (userServices.size === 0) {
         console.log(
           `🧹 No more services for user ${userId}, cleaning up event handlers`
@@ -439,7 +416,6 @@ async function stopService(userId, serviceId) {
         activeServices.delete(userId);
         await cleanupUserEventHandlers(userId);
       } else {
-        // اگر هنوز سرویس‌های دیگه‌ای برای این کاربر هست، event handler رو دوباره تنظیم کن
         console.log(`🔄 Restarting remaining services for user ${userId}`);
         await setupUserEventHandlers(userId);
       }
@@ -477,7 +453,6 @@ async function stopUserServices(userId) {
   try {
     const userServices = activeServices.get(userId);
     if (userServices) {
-      // Stop all services
       for (const [serviceId, serviceData] of userServices.entries()) {
         if (serviceData.cleanupInterval) {
           clearInterval(serviceData.cleanupInterval);
@@ -494,7 +469,6 @@ async function stopUserServices(userId) {
       activeServices.delete(userId);
     }
 
-    // Remove event handlers
     await cleanupUserEventHandlers(userId);
   } catch (err) {
     console.error("Error stopping user services:", err);
@@ -528,7 +502,7 @@ async function initializeAllServices() {
   }
 }
 
-module.exports = {
+export {
   activeServices,
   userEventHandlers,
   startForwardingService,
@@ -537,5 +511,3 @@ module.exports = {
   stopUserServices,
   initializeAllServices,
 };
-
-export { stopService, startUserServices };

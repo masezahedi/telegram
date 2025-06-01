@@ -1,19 +1,19 @@
-const express = require("express");
-const cors = require("cors");
-const { Api } = require("telegram");
-const { verifyToken } = require("./utils/auth");
-const { createClient, activeClients } = require("./services/telegram/client");
-const {
+import express from "express";
+import cors from "cors";
+import { Api } from "telegram";
+import { verifyToken } from "./utils/auth.js";
+import { createClient, activeClients } from "./services/telegram/client.js";
+import {
   startUserServices,
   stopUserServices,
   initializeAllServices,
-} = require("./services/telegram/service-manager");
-const {
+} from "./services/telegram/service-manager.js";
+import {
   messageMaps,
   saveMessageMap,
   cleanExpiredMessages,
-} = require("./services/telegram/message-maps");
-const { API_ID, API_HASH } = require("./config");
+} from "./services/telegram/message-maps.js";
+import { API_ID, API_HASH } from "./config/index.js";
 
 const app = express();
 
