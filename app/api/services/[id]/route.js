@@ -57,7 +57,7 @@ export async function PUT(request, { params }) {
     await db.run(
       `
       UPDATE forwarding_services
-      SET 
+      SET
         name = ?,
         type = ?,
         source_channels = ?,
@@ -66,9 +66,9 @@ export async function PUT(request, { params }) {
         prompt_template = ?,
         copy_history = ?,
         history_limit = ?,
-        history_direction,
-        start_from_id,
-        copy_direction,
+        history_direction = ?,
+        start_from_id = ?,
+        copy_direction = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND user_id = ?
     `,
