@@ -19,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TelegramService } from "@/lib/services/telegram-service";
 import { UserService } from "@/lib/services/user-service";
 import { Shield } from "lucide-react";
+import { UserService } from "@/lib/services/user-service";
 
 // Step 1: Phone number validation
 const phoneSchema = z.object({
@@ -82,6 +83,27 @@ export default function TelegramConnection({ user }) {
   const handleSendCode = async (data) => {
     setLoading(true);
     try {
+      const phoneCheckResult = await UserService.checkPhoneNumber(
+        data.phoneNumber
+      );
+
+      if (phoneCheckResult.success && phoneCheckResult.inUse) {
+        toast.error(
+          phoneCheckResult.message ||
+            "این شماره تلفن قبلاً توسط کاربر دیگری ثبت شده است."
+        );
+        setLoading(false);
+        return;
+      } else if (!phoneCheckResult.success) {
+        // Handle cases where the check itself failed
+        toast.error(
+          phoneCheckResult.error ||
+            "خطا در بررسی شماره تلفن. لطفاً دوباره تلاش کنید."
+        );
+        setLoading(false);
+        return;
+      }
+
       const response = await TelegramService.sendCode(data.phoneNumber);
       if (response.success) {
         setPhoneCodeHash(response.phoneCodeHash);
