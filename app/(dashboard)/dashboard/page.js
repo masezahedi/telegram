@@ -1,19 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { UserService } from "@/lib/services/user-service";
-import { AuthService } from "@/lib/services/auth-service";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import DashboardLayout from "@/components/dashboard/dashboard-layout";
-import TelegramConnection from "@/components/dashboard/telegram-connection";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { UserService } from '@/lib/services/user-service';
+import { AuthService } from '@/lib/services/auth-service';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import DashboardLayout from '@/components/dashboard/dashboard-layout';
+import TelegramConnection from '@/components/dashboard/telegram-connection';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -24,9 +18,9 @@ export default function Dashboard() {
     const checkAuthAndLoadUser = async () => {
       try {
         const isAuthenticated = await AuthService.isAuthenticated();
-
+        
         if (!isAuthenticated) {
-          router.replace("/login");
+          router.replace('/login');
           return;
         }
 
@@ -39,13 +33,13 @@ export default function Dashboard() {
           if (userData) {
             setUser(userData);
           } else {
-            router.replace("/login");
+            router.replace('/login');
           }
         }
       } catch (error) {
-        console.error("Error loading dashboard:", error);
-        toast.error("خطا در بارگذاری اطلاعات");
-        router.replace("/login");
+        console.error('Error loading dashboard:', error);
+        toast.error('خطا در بارگذاری اطلاعات');
+        router.replace('/login');
       } finally {
         setLoading(false);
       }

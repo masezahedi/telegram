@@ -1,27 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { AuthService } from "@/lib/services/auth-service";
-import { UserService } from "@/lib/services/user-service";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import DashboardLayout from "@/components/dashboard/dashboard-layout";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { AuthService } from '@/lib/services/auth-service';
+import { UserService } from '@/lib/services/user-service';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import DashboardLayout from '@/components/dashboard/dashboard-layout';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 
 export default function Users() {
   const router = useRouter();
@@ -34,13 +21,13 @@ export default function Users() {
       try {
         const isAuthenticated = await AuthService.isAuthenticated();
         if (!isAuthenticated) {
-          router.replace("/login");
+          router.replace('/login');
           return;
         }
 
         const currentUser = AuthService.getStoredUser();
         if (!currentUser?.is_admin) {
-          router.replace("/dashboard");
+          router.replace('/dashboard');
           return;
         }
 
@@ -48,8 +35,8 @@ export default function Users() {
         const usersData = await UserService.getAllUsers();
         setUsers(usersData);
       } catch (error) {
-        console.error("Error loading users:", error);
-        toast.error("خطا در بارگذاری اطلاعات");
+        console.error('Error loading users:', error);
+        toast.error('خطا در بارگذاری اطلاعات');
       } finally {
         setLoading(false);
       }
@@ -98,7 +85,7 @@ export default function Users() {
                   <TableRow key={user.id}>
                     <TableCell>{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
-                    <TableCell>{user.phone_number || "-"}</TableCell>
+                    <TableCell>{user.phone_number || '-'}</TableCell>
                     <TableCell>
                       {user.telegram_session ? (
                         <span className="text-success">متصل</span>
