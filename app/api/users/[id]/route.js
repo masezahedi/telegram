@@ -1,42 +1,44 @@
-import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/auth';
-import { openDb } from '@/lib/db';
-export const dynamic = 'force-dynamic';
+// app/api/users/[id]/route.js
+import { NextResponse } from "next/server"; //
+import { verifyToken } from "@/lib/auth"; //
+import { openDb } from "@/lib/db"; //
+export const dynamic = "force-dynamic"; //
 
 export async function GET(request, { params }) {
   try {
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    const decoded = await verifyToken(token);
-    
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
+
     if (!decoded) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
-    const db = await openDb();
-    
+    const db = await openDb(); //
+
     // Check if user is admin
-    const adminCheck = await db.get(
-      'SELECT is_admin FROM users WHERE id = ?',
-      [decoded.userId]
-    );
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
+      decoded.userId,
+    ]); //
 
     if (!adminCheck?.is_admin) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
     // Get user details
-    const user = await db.get(`
+    const user = await db.get(
+      `
       SELECT 
         u.id,
         u.name,
         u.email,
         u.phone_number,
+        u.telegram_id, //  افزودن آی‌دی تلگرام
         u.telegram_session,
         u.is_admin,
         u.created_at,
@@ -44,35 +46,41 @@ export async function GET(request, { params }) {
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
       WHERE u.id = ?
-    `, [params.id]);
+    `,
+      [params.id]
+    ); //
 
     if (!user) {
       return NextResponse.json(
-        { success: false, error: 'User not found' },
+        { success: false, error: "User not found" },
         { status: 404 }
-      );
+      ); //
     }
 
     // Get user's services
-    const services = await db.all(`
+    const services = await db.all(
+      `
       SELECT *
       FROM forwarding_services
       WHERE user_id = ?
       ORDER BY created_at DESC
-    `, [params.id]);
+    `,
+      [params.id]
+    ); //
 
     return NextResponse.json({
-      success: true,
+      success: true, //
       user: {
         ...user,
-        services
-      }
-    });
+        services, //
+        telegram_id: user.telegram_id, // اطمینان از وجود آی‌دی تلگرام در پاسخ
+      },
+    }); //
   } catch (error) {
-    console.error('Get user details error:', error);
+    console.error("Get user details error:", error); //
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: "Internal server error" },
       { status: 500 }
-    );
+    ); //
   }
 }
