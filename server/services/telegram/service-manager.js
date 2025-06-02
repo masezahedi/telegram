@@ -6,6 +6,7 @@ const {
   messageMaps,
   loadMessageMap,
   saveMessageMap,
+  deleteMessageMapFile,
   cleanExpiredMessages,
 } = require("./message-maps");
 
@@ -607,6 +608,9 @@ async function stopService(userId, serviceId) {
         messageMaps.delete(serviceId);
       }
 
+      // 🔥 NEW: حذف فایل message mapping فیزیکی
+      deleteMessageMapFile(serviceId);
+
       userServices.delete(serviceId);
       lastCopyHistoryRunTimestamp.delete(serviceId);
 
@@ -619,7 +623,9 @@ async function stopService(userId, serviceId) {
         await setupUserEventHandlers(userId);
       }
 
-      console.log(`✅ Service ${serviceId} successfully stopped`);
+      console.log(
+        `✅ Service ${serviceId} successfully stopped and cleaned up`
+      );
     }
   } catch (err) {
     console.error(`❌ Error stopping service ${serviceId}:`, err);
