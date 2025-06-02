@@ -1,22 +1,22 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Separator } from '@/components/ui/separator';
-import { 
-  LogOut, 
-  Menu, 
-  User, 
-  Home, 
-  Settings, 
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
+import {
+  LogOut,
+  Menu,
+  User,
+  Home,
+  Settings,
   MessageCircle,
-  Users
-} from 'lucide-react';
-import { AuthService } from '@/lib/services/auth-service';
-import ConnectionStatus from '@/components/dashboard/connection-status';
+  Users,
+} from "lucide-react";
+import { AuthService } from "@/lib/services/auth-service";
+import ConnectionStatus from "@/components/dashboard/connection-status";
 
 export default function DashboardLayout({ children, user }) {
   const router = useRouter();
@@ -24,21 +24,21 @@ export default function DashboardLayout({ children, user }) {
 
   useEffect(() => {
     setIsMounted(true);
-    
+
     // Verify authentication
     const checkAuth = async () => {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (!isAuthenticated) {
-        router.push('/login');
+        router.push("/login");
       }
     };
-    
+
     checkAuth();
   }, [router]);
 
   const handleLogout = async () => {
     await AuthService.logout();
-    router.push('/login');
+    router.push("/login");
   };
 
   if (!isMounted) return null;
@@ -64,28 +64,43 @@ export default function DashboardLayout({ children, user }) {
                   <div className="flex-1">
                     <nav className="flex flex-col gap-2">
                       <Link href="/dashboard" passHref>
-                        <Button variant="ghost" className="w-full justify-start">
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                        >
                           <Home className="ml-2 h-5 w-5" /> داشبورد
                         </Button>
                       </Link>
                       <Link href="/dashboard/profile" passHref>
-                        <Button variant="ghost" className="w-full justify-start">
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                        >
                           <User className="ml-2 h-5 w-5" /> پروفایل
                         </Button>
                       </Link>
                       <Link href="/dashboard/settings" passHref>
-                        <Button variant="ghost" className="w-full justify-start">
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                        >
                           <Settings className="ml-2 h-5 w-5" /> تنظیمات
                         </Button>
                       </Link>
                       <Link href="/dashboard/services" passHref>
-                        <Button variant="ghost" className="w-full justify-start">
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                        >
                           <MessageCircle className="ml-2 h-5 w-5" /> سرویس‌ها
                         </Button>
                       </Link>
                       {user?.isAdmin && (
                         <Link href="/dashboard/users" passHref>
-                          <Button variant="ghost" className="w-full justify-start">
+                          <Button
+                            variant="ghost"
+                            className="w-full justify-start"
+                          >
                             <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
                           </Button>
                         </Link>
@@ -94,22 +109,28 @@ export default function DashboardLayout({ children, user }) {
                   </div>
                   <div className="py-4">
                     <Separator className="mb-4" />
-                    <Button onClick={handleLogout} variant="destructive" className="w-full">
+                    <Button
+                      onClick={handleLogout}
+                      variant="destructive"
+                      className="w-full"
+                    >
                       <LogOut className="ml-2 h-5 w-5" /> خروج
                     </Button>
                   </div>
                 </div>
               </SheetContent>
             </Sheet>
-            
+
             <Link href="/" className="text-2xl font-bold text-primary">
               تلگرام‌ سرویس
             </Link>
           </div>
-          
+
           <div className="flex items-center gap-4">
-            {user && <ConnectionStatus isConnected={Boolean(user.telegramSession)} />}
-            
+            {user && (
+              <ConnectionStatus isConnected={user.isTelegramConnected} />
+            )}
+
             <div className="hidden md:flex items-center gap-4">
               <Button variant="ghost" onClick={handleLogout} size="sm">
                 <LogOut className="ml-2 h-4 w-4" />
@@ -159,7 +180,7 @@ export default function DashboardLayout({ children, user }) {
               </nav>
             </div>
           </div>
-          
+
           <div className="mt-auto">
             <Separator className="mb-4" />
             <Button onClick={handleLogout} variant="outline" className="w-full">
@@ -167,11 +188,9 @@ export default function DashboardLayout({ children, user }) {
             </Button>
           </div>
         </aside>
-        
+
         {/* Main Content */}
-        <main className="flex-1">
-          {children}
-        </main>
+        <main className="flex-1">{children}</main>
       </div>
     </div>
   );

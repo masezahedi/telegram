@@ -50,7 +50,9 @@ export default function TelegramConnection({ user }) {
   const [loading, setLoading] = useState(false);
   const [phoneCodeHash, setPhoneCodeHash] = useState(null);
   const [requires2FA, setRequires2FA] = useState(false);
-  const [connected, setConnected] = useState(Boolean(user?.telegramSession));
+  const [connected, setConnected] = useState(
+    Boolean(user?.isTelegramConnected)
+  );
 
   // Step 1: Phone number form
   const phoneForm = useForm({
