@@ -113,7 +113,8 @@ export default function TelegramConnection({ user }) {
         // Code verified successfully and no 2FA required
         await updateUserSession(
           response.stringSession,
-          phoneForm.getValues("phoneNumber")
+          phoneForm.getValues("phoneNumber"),
+          response.telegramUserId // ارسال شناسه تلگرام
         );
       } else if (response.requires2FA) {
         // 2FA required
@@ -145,7 +146,8 @@ export default function TelegramConnection({ user }) {
       if (response.success) {
         await updateUserSession(
           response.stringSession,
-          phoneForm.getValues("phoneNumber")
+          phoneForm.getValues("phoneNumber"),
+          response.telegramUserId // ارسال شناسه تلگرام
         );
       } else {
         toast.error(
@@ -162,7 +164,7 @@ export default function TelegramConnection({ user }) {
   };
 
   // Update user session
-  const updateUserSession = async (session, phoneNumber) => {
+  const updateUserSession = async (session, phoneNumber, telegramUserId) => {
     try {
       const response = await UserService.updateTelegramSession({
         telegramSession: session,
@@ -190,14 +192,31 @@ export default function TelegramConnection({ user }) {
 
     setLoading(true);
     try {
-      const response = await UserService.disconnectTelegram();
-
-      if (response.success) {
-        setConnected(false);
-        toast.success("اتصال به تلگرام با موفقیت قطع شد");
+      const userServiceResponse = await UserService.updateTelegramSession({
+        telegramSession: session,
+        phoneNumber: phoneNumber,
+        telegramUserId: telegramUserId, // ارسال شناسه تلگرام به سرویس کاربر
+      });
+      // ... مدیریت پاسخ و به‌روزرسانی localStorage با کمک AuthService.updateStoredUser
+      if (userServiceResponse.success && userServiceResponse.user) {
+        const {
+          telegramSession: updatedTgSession,
+          telegram_user_id: updatedTgUserId,
+          ...restOfUser
+        } = userServiceResponse.user;
+        AuthService.updateStoredUser({
+          ...restOfUser,
+          isTelegramConnected: Boolean(updatedTgSession),
+          telegramUserId: updatedTgUserId, // اطمینان از ذخیره شناسه تلگرام در localStorage
+          isAdmin: Boolean(userServiceResponse.user.is_admin),
+        });
+        setConnected(true);
+        toast.success("اتصال به تلگرام با موفقیت انجام شد");
+        setStep(1);
       } else {
         toast.error(
-          response.error || "خطا در قطع اتصال. لطفاً دوباره تلاش کنید."
+          userServiceResponse.error ||
+            "خطا در ذخیره اطلاعات. لطفاً دوباره تلاش کنید."
         );
       }
     } catch (error) {
