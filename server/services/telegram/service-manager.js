@@ -71,30 +71,34 @@ async function createUserEventHandler(userId, services, client) {
         return;
       }
 
-      // 🔥 NEW: جلوگیری از پردازش تکراری پیام‌ها
+      // 🔥 IMPROVED: تنظیم مجدد منطق cache برای ویرایش‌ها
       if (!processedMessages.has(userId)) {
         processedMessages.set(userId, new Set());
       }
 
       const userProcessedSet = processedMessages.get(userId);
-      const messageKey = `${message.id}_${isEdit ? "edit" : "new"}`;
 
-      if (userProcessedSet.has(messageKey)) {
+      // 🔥 برای ویرایش‌ها، cache را بررسی نکن چون ممکن است نیاز به پردازش مجدد باشد
+      if (!isEdit) {
+        const messageKey = `${message.id}_new`;
+        if (userProcessedSet.has(messageKey)) {
+          console.log(
+            `⚠️ New message ${message.id} already processed for user ${userId}. Skipping.`
+          );
+          return;
+        }
+        userProcessedSet.add(messageKey);
+
+        // پاک کردن خودکار cache بعد از مدت زمان مشخص
+        setTimeout(() => {
+          userProcessedSet.delete(messageKey);
+        }, PROCESSED_MESSAGE_CACHE_TIME);
+      } else {
+        // برای ویرایش‌ها، فقط log کن
         console.log(
-          `⚠️ Message ${message.id} (${
-            isEdit ? "edit" : "new"
-          }) already processed for user ${userId}. Skipping.`
+          `✏️ Processing edit for message ${message.id} for user ${userId}`
         );
-        return;
       }
-
-      // اضافه کردن به cache
-      userProcessedSet.add(messageKey);
-
-      // پاک کردن خودکار cache بعد از مدت زمان مشخص
-      setTimeout(() => {
-        userProcessedSet.delete(messageKey);
-      }, PROCESSED_MESSAGE_CACHE_TIME);
 
       // Extract channel ID
       let channelId = null;
@@ -161,7 +165,7 @@ async function createUserEventHandler(userId, services, client) {
               `🔄 Processing message ${message.id} for service ${serviceId}, isEdit: ${isEdit}`
             );
 
-            await processMessage(
+            const result = await processMessage(
               message,
               isEdit,
               matchedSourceChannelIds,
@@ -169,6 +173,16 @@ async function createUserEventHandler(userId, services, client) {
               client,
               serviceData.genAI
             );
+
+            if (result && Object.keys(result).length > 0) {
+              console.log(
+                `✅ Message ${message.id} processed successfully for service ${serviceId}`
+              );
+            } else if (isEdit) {
+              console.log(
+                `⚠️ Edit processing failed or skipped for message ${message.id} in service ${serviceId}`
+              );
+            }
           }
         } catch (err) {
           console.error(

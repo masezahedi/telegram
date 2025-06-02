@@ -1,4 +1,4 @@
-// Fixed message-handler.js
+// Fixed message-handler.js - اصلاح شده برای پشتیبانی از ویرایش پیام‌ها
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { messageMaps } = require("./message-maps");
 const { cleanExpiredMessages, saveMessageMap } = require("./message-maps");
@@ -55,7 +55,56 @@ async function sendNewMessage(
   }
 }
 
-// Process message
+// 🔥 NEW: Edit existing message
+async function editExistingMessage(
+  targetMessageId,
+  finalText,
+  targetChannel,
+  hasValidMedia,
+  message,
+  client
+) {
+  try {
+    console.log(`✏️ Editing message ID: ${targetMessageId}`);
+
+    if (hasValidMedia) {
+      // برای پیام‌های رسانه‌ای، فقط caption را ویرایش می‌کنیم
+      // چون نمی‌توان فایل رسانه را ویرایش کرد
+      await client.editMessage(targetChannel, {
+        message: targetMessageId,
+        text: finalText,
+        parseMode: "html",
+      });
+      console.log("✅ Media message caption edited");
+    } else {
+      // برای پیام‌های متنی
+      await client.editMessage(targetChannel, {
+        message: targetMessageId,
+        text: finalText,
+        parseMode: "html",
+      });
+      console.log("✅ Text message edited");
+    }
+
+    return true;
+  } catch (err) {
+    console.error("❌ Error editing message:", err);
+
+    // اگر ویرایش ناموفق بود، پیام جدید ارسال کن
+    console.log("🔄 Attempting to send new message instead of edit");
+    const sentMessage = await sendNewMessage(
+      message,
+      finalText,
+      targetChannel,
+      hasValidMedia,
+      client
+    );
+
+    return sentMessage ? sentMessage.id.toString() : null;
+  }
+}
+
+// 🔥 IMPROVED: Process message with edit support
 async function processMessage(
   message,
   isEdit,
@@ -73,7 +122,7 @@ async function processMessage(
 
     if (!message) {
       console.log(`⛔ Service ${serviceId}: Empty message`);
-      return null; // بازگشت null برای خطا
+      return null;
     }
 
     // استخراج channelId
@@ -129,10 +178,18 @@ async function processMessage(
 
     console.log(`📝 Processing message: ${messageKey}, isEdit: ${isEdit}`);
 
-    // اگر پیام قبلاً پردازش شده، از ارسال مجدد جلوگیری کن
-    if (messageMap.has(messageKey)) {
+    // 🔥 IMPROVED: بررسی وضعیت پیام برای تصمیم‌گیری بین ارسال جدید یا ویرایش
+    const existingMessageData = messageMap.get(messageKey);
+
+    if (isEdit && !existingMessageData) {
       console.log(
-        `⏭️ Service ${serviceId}: Message already processed, skipping`
+        `⚠️ Service ${serviceId}: Edit requested but original message not found in map. Treating as new message.`
+      );
+    }
+
+    if (!isEdit && existingMessageData) {
+      console.log(
+        `⏭️ Service ${serviceId}: New message but already exists in map, skipping duplicate`
       );
       return null;
     }
@@ -167,8 +224,8 @@ async function processMessage(
       }
     }
 
-    // ارسال به کانال‌های مقصد
-    const forwardedMessages = {}; // ذخیره پیام‌های فوروارد شده
+    // 🔥 IMPROVED: ارسال یا ویرایش پیام‌ها بر اساس وضعیت
+    const forwardedMessages = {};
 
     for (const targetUsername of targetChannels) {
       try {
@@ -177,43 +234,99 @@ async function processMessage(
           : `@${targetUsername}`;
         const targetEntity = await client.getEntity(formattedUsername);
 
-        // ارسال پیام جدید (حتی برای ویرایش، اگر پیام هدف وجود نداشته باشد)
-        console.log(
-          `📤 Service ${serviceId}: Sending message to ${targetUsername}`
-        );
-        const sentMessage = await sendNewMessage(
-          message,
-          processedText,
-          targetEntity,
-          hasMedia,
-          client
-        );
-
-        if (sentMessage) {
-          forwardedMessages[targetUsername] = sentMessage.id.toString();
+        if (
+          isEdit &&
+          existingMessageData &&
+          existingMessageData.targetMessageIds[targetUsername]
+        ) {
+          // 🔥 ویرایش پیام موجود
+          const targetMessageId =
+            existingMessageData.targetMessageIds[targetUsername];
           console.log(
-            `✅ Service ${serviceId}: Message sent to ${targetUsername} (ID: ${sentMessage.id})`
+            `✏️ Service ${serviceId}: Editing message ${targetMessageId} in ${targetUsername}`
           );
+
+          const editResult = await editExistingMessage(
+            targetMessageId,
+            processedText,
+            targetEntity,
+            hasMedia,
+            message,
+            client
+          );
+
+          if (editResult === true) {
+            // ویرایش موفق بود، ID قبلی را حفظ کن
+            forwardedMessages[targetUsername] = targetMessageId;
+            console.log(
+              `✅ Service ${serviceId}: Message edited in ${targetUsername} (ID: ${targetMessageId})`
+            );
+          } else if (editResult) {
+            // پیام جدید ارسال شد به جای ویرایش
+            forwardedMessages[targetUsername] = editResult;
+            console.log(
+              `✅ Service ${serviceId}: New message sent instead of edit in ${targetUsername} (ID: ${editResult})`
+            );
+          }
+        } else {
+          // 🔥 ارسال پیام جدید
+          console.log(
+            `📤 Service ${serviceId}: Sending new message to ${targetUsername}`
+          );
+          const sentMessage = await sendNewMessage(
+            message,
+            processedText,
+            targetEntity,
+            hasMedia,
+            client
+          );
+
+          if (sentMessage) {
+            forwardedMessages[targetUsername] = sentMessage.id.toString();
+            console.log(
+              `✅ Service ${serviceId}: New message sent to ${targetUsername} (ID: ${sentMessage.id})`
+            );
+          }
         }
       } catch (err) {
-        console.error(`❌ Error sending to ${targetUsername}:`, err);
+        console.error(`❌ Error processing ${targetUsername}:`, err);
       }
     }
 
-    // ذخیره در messageMaps فقط اگر پیام‌ها با موفقیت ارسال شدند
+    // 🔥 IMPROVED: ذخیره یا به‌روزرسانی messageMap
     if (Object.keys(forwardedMessages).length > 0) {
       const messageData = {
         targetMessageIds: forwardedMessages,
         timestamp: currentTime,
         originalChannelId: channelId.toString(),
         originalMessageId: message.id,
+        lastUpdated: currentTime,
+        editCount: existingMessageData
+          ? (existingMessageData.editCount || 0) + 1
+          : 0,
       };
+
       messageMap.set(messageKey, messageData);
       messageMaps.set(serviceId, messageMap);
-      console.log(`💾 Service ${serviceId}: Message mapping saved`);
+
+      console.log(
+        `💾 Service ${serviceId}: Message mapping ${
+          isEdit ? "updated" : "saved"
+        } (Edit count: ${messageData.editCount})`
+      );
+
+      // ذخیره تغییرات در فایل
+      try {
+        saveMessageMap(serviceId, messageMap);
+      } catch (err) {
+        console.error(
+          `❌ Service ${serviceId}: Error saving message map:`,
+          err
+        );
+      }
     }
 
-    return forwardedMessages; // بازگرداندن پیام‌های فوروارد شده
+    return forwardedMessages;
   } catch (err) {
     console.error(`❌ Service ${service.id}: Message processing error:`, err);
     return null;
