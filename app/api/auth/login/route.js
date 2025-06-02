@@ -58,7 +58,6 @@ export async function POST(request) {
         email: user.email,
         telegramSession: user.telegram_session,
         phoneNumber: user.phone_number,
-        telegram_user_id: user.telegram_user_id, // اضافه شده
         is_admin: Boolean(user.is_admin),
       },
     });

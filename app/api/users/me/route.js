@@ -17,8 +17,8 @@ export async function GET(request) {
 
     const db = await openDb();
     const user = await db.get(
-      `SELECT id, name, email, telegram_session, phone_number, telegram_user_id, is_admin
-       FROM users WHERE id = ?`, // telegram_user_id اضافه شده
+      `SELECT id, name, email, telegram_session, phone_number, is_admin 
+       FROM users WHERE id = ?`,
       [decoded.userId]
     );
 
@@ -37,7 +37,6 @@ export async function GET(request) {
         email: user.email,
         telegramSession: user.telegram_session,
         phoneNumber: user.phone_number,
-        telegramUserId: user.telegram_user_id, // نام فیلد در پاسخ به telegramUserId تغییر یافت
         isAdmin: Boolean(user.is_admin),
       },
     });

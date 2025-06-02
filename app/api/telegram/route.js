@@ -14,49 +14,27 @@ export async function POST(request) {
       );
     }
 
-    const { telegramSession, phoneNumber, telegramUserId } =
-      await request.json();
+    const { telegramSession, phoneNumber } = await request.json();
 
-    if (!telegramSession || !telegramUserId) {
+    if (!telegramSession) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "اطلاعات ناقص است. سشن تلگرام و شناسه کاربری تلگرام الزامی است.",
-        },
+        { success: false, error: "اطلاعات ناقص است" },
         { status: 400 }
       );
     }
 
     const db = await openDb();
 
-    // بررسی اینکه آیا شناسه تلگرام قبلاً به کاربر دیگری متصل شده است
-    const existingUserWithTelegramId = await db.get(
-      "SELECT id FROM users WHERE telegram_user_id = ? AND id != ?",
-      [telegramUserId, decoded.userId]
-    );
-
-    if (existingUserWithTelegramId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "این حساب تلگرام قبلاً به حساب دیگری در سایت متصل شده است.",
-        },
-        { status: 409 } // Conflict
-      );
-    }
-
     // Update user's Telegram session
     await db.run(
-      "UPDATE users SET telegram_session = ?, phone_number = ?, telegram_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [telegramSession, phoneNumber || null, telegramUserId, decoded.userId]
+      "UPDATE users SET telegram_session = ?, phone_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [telegramSession, phoneNumber || null, decoded.userId]
     );
 
     // Get updated user data
-    const updatedUser = await db.get(
-      "SELECT id, name, email, telegram_session, phone_number, telegram_user_id, is_admin FROM users WHERE id = ?",
-      [decoded.userId]
-    );
+    const updatedUser = await db.get("SELECT * FROM users WHERE id = ?", [
+      decoded.userId,
+    ]);
 
     if (!updatedUser) {
       return NextResponse.json(
@@ -72,8 +50,6 @@ export async function POST(request) {
       email: updatedUser.email,
       telegramSession: updatedUser.telegram_session,
       phoneNumber: updatedUser.phone_number,
-      telegram_user_id: updatedUser.telegram_user_id, // ارسال شناسه تلگرام در پاسخ
-      is_admin: Boolean(updatedUser.is_admin),
     };
 
     return NextResponse.json({
@@ -82,19 +58,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Update Telegram session error:", error);
-    if (
-      error.message &&
-      error.message.includes("UNIQUE constraint failed: users.telegram_user_id")
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "این حساب تلگرام قبلاً به حساب دیگری در سایت متصل شده است یا خطای یکتایی رخ داده است.",
-        },
-        { status: 409 }
-      );
-    }
     return NextResponse.json(
       {
         success: false,
@@ -120,15 +83,14 @@ export async function DELETE(request) {
 
     // Remove user's Telegram session
     await db.run(
-      "UPDATE users SET telegram_session = NULL, phone_number = NULL, telegram_user_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", // telegram_user_id نیز NULL می‌شود
+      "UPDATE users SET telegram_session = NULL, phone_number = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [decoded.userId]
     );
 
     // Get updated user data
-    const updatedUser = await db.get(
-      "SELECT id, name, email, telegram_session, phone_number, telegram_user_id, is_admin FROM users WHERE id = ?",
-      [decoded.userId]
-    );
+    const updatedUser = await db.get("SELECT * FROM users WHERE id = ?", [
+      decoded.userId,
+    ]);
 
     if (!updatedUser) {
       return NextResponse.json(
@@ -144,8 +106,6 @@ export async function DELETE(request) {
       email: updatedUser.email,
       telegramSession: null,
       phoneNumber: null,
-      telegram_user_id: null,
-      is_admin: Boolean(updatedUser.is_admin),
     };
 
     return NextResponse.json({

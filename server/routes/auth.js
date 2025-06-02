@@ -62,12 +62,10 @@ router.post("/signIn", async (req, res) => {
       })
     );
 
-    const me = await client.getMe();
-    const telegramUserId = me.id.toString();
     const stringSession = client.session.save();
     activeClients.delete(phoneNumber);
 
-    res.json({ success: true, stringSession, telegramUserId });
+    res.json({ success: true, stringSession });
   } catch (err) {
     console.error("Error in signIn:", err);
     if (err.message.includes("SESSION_PASSWORD_NEEDED")) {
@@ -105,15 +103,12 @@ router.post("/checkPassword", async (req, res) => {
       })
     );
 
-    const me = await client.getMe(); // دریافت اطلاعات کاربر تلگرام
-    const telegramUserId = me.id.toString(); // استخراج شناسه تلگرام
     const stringSession = client.session.save();
     activeClients.delete(phoneNumber);
 
     res.json({
       success: true,
       stringSession,
-      telegramUserId,
     });
   } catch (err) {
     console.error("Error in checkPassword:", err);
