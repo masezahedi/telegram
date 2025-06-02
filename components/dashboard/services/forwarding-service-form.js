@@ -98,7 +98,7 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
   useEffect(() => {
     const checkRequirements = async () => {
       const user = AuthService.getStoredUser();
-      setIsTelegramConnected(Boolean(user?.telegramSession));
+      setIsTelegramConnected(Boolean(user?.isTelegramConnected));
 
       const settings = await SettingsService.getSettings();
       setHasGeminiKey(Boolean(settings?.gemini_api_key));
