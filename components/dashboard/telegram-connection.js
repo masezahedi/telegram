@@ -19,7 +19,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TelegramService } from "@/lib/services/telegram-service";
 import { UserService } from "@/lib/services/user-service";
 import { Shield } from "lucide-react";
-import { UserService } from "@/lib/services/user-service";
 
 // Step 1: Phone number validation
 const phoneSchema = z.object({
