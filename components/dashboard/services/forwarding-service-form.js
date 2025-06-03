@@ -345,7 +345,10 @@ export default function ForwardingServiceForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="space-y-8 dir-rtl"
+      >
         {" "}
         {/* Removed text-right here, rely on html dir */}
         <Card>
@@ -355,7 +358,7 @@ export default function ForwardingServiceForm({
               تنظیمات اصلی سرویس
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6 dir-rtl">
+          <CardContent className="space-y-6">
             <FormField
               control={form.control}
               name="name"
