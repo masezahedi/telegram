@@ -8,6 +8,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// GET function remains the same as in Phase 3 (New)
 export async function GET(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -21,18 +22,20 @@ export async function GET(request) {
     }
 
     const db = await openDb();
-    const services = await db.all(
+    const servicesFromDb = await db.all(
+      // Renamed to avoid conflict
       "SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC",
       [decoded.userId]
     );
 
     return NextResponse.json({
       success: true,
-      services: services.map((service) => ({
+      services: servicesFromDb.map((service) => ({
+        // Use servicesFromDb
         ...service,
-        source_channels: JSON.parse(service.source_channels),
-        target_channels: JSON.parse(service.target_channels),
-        search_replace_rules: JSON.parse(service.search_replace_rules),
+        source_channels: JSON.parse(service.source_channels || "[]"),
+        target_channels: JSON.parse(service.target_channels || "[]"),
+        search_replace_rules: JSON.parse(service.search_replace_rules || "[]"),
         is_active: Boolean(service.is_active),
         useAI: Boolean(service.prompt_template),
         type: service.type || "forward",
@@ -41,6 +44,7 @@ export async function GET(request) {
         history_direction: service.history_direction ?? "newest",
         start_from_id: service.start_from_id,
         copy_direction: service.copy_direction ?? "before",
+        // service_activated_at will be included here automatically if present in DB
       })),
     });
   } catch (error) {
@@ -52,6 +56,7 @@ export async function GET(request) {
   }
 }
 
+// POST function remains the same as in Phase 3 (New)
 export async function POST(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -101,31 +106,15 @@ export async function POST(request) {
 
     const now = new Date();
 
-    // --- Start of Limit Checks ---
     if (!user.is_admin) {
       if (
         user.is_premium &&
         user.premium_expiry_date &&
         new Date(user.premium_expiry_date) > now
       ) {
-        // Premium User Logic (Phase 3 - New)
-        // Assuming new services are intended to be active or will be activated shortly.
-        // We check if creating *and activating* this would exceed the limit.
-        // A more precise check could be if the form has an "activate_on_create" flag.
-        // For now, if they are at their limit of active services, they can still create an inactive one.
-        // The activation (PUT) will strictly enforce the active limit.
-        const activeServicesCount = await db.get(
-          "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1",
-          [decoded.userId]
-        );
-        // If they want to create this service and immediately activate it (hypothetically)
-        // and they already have 5 active, then block.
-        // This check is more relevant for activation, but we can prevent creation if they are already at max
-        // and the intention is likely to activate this new one.
-        // For now, let's allow creation even if at 5 active, activation will be blocked.
-        // Premium users do not have restrictions on source/destination channel counts.
+        // Premium User Logic: No specific creation limits other than active count (handled in PUT)
       } else {
-        // Normal User Logic (Phase 2)
+        // Normal User Logic
         if (
           sourceChannels.filter(Boolean).length > 1 ||
           targetChannels.filter(Boolean).length > 1
@@ -139,14 +128,12 @@ export async function POST(request) {
             { status: 403 }
           );
         }
-        // service_creation_count logic was removed as per user request
       }
     }
-    // --- End of Limit Checks ---
 
     const serviceId = Date.now().toString();
 
-    const result = await db.run(
+    await db.run(
       `
   INSERT INTO forwarding_services (
     id,
@@ -163,9 +150,10 @@ export async function POST(request) {
     start_from_id,
     copy_direction,
     created_at,
-    updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`,
+    updated_at,
+    service_activated_at 
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL) 
+`, // service_activated_at is NULL on creation
       [
         serviceId,
         decoded.userId,
@@ -182,8 +170,6 @@ export async function POST(request) {
         copyDirection,
       ]
     );
-
-    // service_creation_count increment logic was removed.
 
     return NextResponse.json({ success: true, serviceId: serviceId });
   } catch (error) {
@@ -207,7 +193,7 @@ export async function PUT(request) {
       );
     }
 
-    const { id, isActive } = await request.json();
+    const { id, isActive } = await request.json(); // Service ID and new active state
     const db = await openDb();
     const user = await db.get(
       "SELECT id, is_admin, is_premium, premium_expiry_date FROM users WHERE id = ?",
@@ -222,16 +208,26 @@ export async function PUT(request) {
     }
 
     const now = new Date();
+    let serviceToUpdate = await db.get(
+      "SELECT * FROM forwarding_services WHERE id = ? AND user_id = ?",
+      [id, decoded.userId]
+    );
+
+    if (!serviceToUpdate) {
+      return NextResponse.json(
+        { success: false, error: "سرویس مورد نظر یافت نشد." },
+        { status: 404 }
+      );
+    }
 
     // --- Start of Limit Checks for Activation ---
     if (isActive && !user.is_admin) {
-      // Checks for both normal and premium users if they are not admin
       if (
         user.is_premium &&
         user.premium_expiry_date &&
         new Date(user.premium_expiry_date) > now
       ) {
-        // Premium User Activation Logic (Phase 3 - New)
+        // Premium User Activation Logic
         const activeServicesCount = await db.get(
           "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
           [decoded.userId, id]
@@ -246,9 +242,8 @@ export async function PUT(request) {
             { status: 403 }
           );
         }
-        // Premium users do not have source/destination count restrictions for activation
       } else {
-        // Normal User Activation Logic (Phase 2)
+        // Normal User Activation Logic
         const activeServicesCount = await db.get(
           "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
           [decoded.userId, id]
@@ -263,50 +258,54 @@ export async function PUT(request) {
           );
         }
 
-        const serviceToActivate = await db.get(
-          "SELECT source_channels, target_channels FROM forwarding_services WHERE id = ? AND user_id = ?",
-          [id, decoded.userId]
-        );
-        if (serviceToActivate) {
-          const sourceChannels = JSON.parse(serviceToActivate.source_channels);
-          const targetChannels = JSON.parse(serviceToActivate.target_channels);
-          if (
-            sourceChannels.filter(Boolean).length > 1 ||
-            targetChannels.filter(Boolean).length > 1
-          ) {
-            return NextResponse.json(
-              {
-                success: false,
-                error:
-                  "سرویس کاربران عادی فقط می‌تواند یک کانال مبدأ و یک کانال مقصد داشته باشد.",
-              },
-              { status: 403 }
-            );
-          }
-        } else {
+        const sourceChannels = JSON.parse(serviceToUpdate.source_channels);
+        const targetChannels = JSON.parse(serviceToUpdate.target_channels);
+        if (
+          sourceChannels.filter(Boolean).length > 1 ||
+          targetChannels.filter(Boolean).length > 1
+        ) {
           return NextResponse.json(
             {
               success: false,
-              error: "سرویس مورد نظر برای فعال سازی یافت نشد.",
+              error:
+                "سرویس کاربران عادی فقط می‌تواند یک کانال مبدأ و یک کانال مقصد داشته باشد.",
             },
-            { status: 404 }
+            { status: 403 }
           );
         }
       }
     }
     // --- End of Limit Checks for Activation ---
 
-    await db.run(
-      `
+    let updateQuery = `
       UPDATE forwarding_services
       SET 
         is_active = ?,
-        activated_at = CASE WHEN ? = 1 AND activated_at IS NULL THEN CURRENT_TIMESTAMP ELSE activated_at END, -- Only set on first activation
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ?
-    `, // Changed activated_at logic
-      [isActive ? 1 : 0, isActive ? 1 : 0, id, decoded.userId]
-    );
+        updated_at = CURRENT_TIMESTAMP`;
+
+    const queryParams = [isActive ? 1 : 0];
+
+    // Set service_activated_at only on the first activation for a normal user
+    if (
+      isActive &&
+      !user.is_admin &&
+      !user.is_premium &&
+      !serviceToUpdate.service_activated_at
+    ) {
+      updateQuery += `, service_activated_at = CURRENT_TIMESTAMP`;
+    }
+
+    // The old `activated_at` might still be useful for tracking last activation,
+    // but for 15-day expiry, `service_activated_at` is key.
+    // If you want `activated_at` to track the most recent activation:
+    if (isActive) {
+      updateQuery += `, activated_at = CURRENT_TIMESTAMP`;
+    }
+
+    updateQuery += ` WHERE id = ? AND user_id = ?`;
+    queryParams.push(id, decoded.userId);
+
+    await db.run(updateQuery, ...queryParams);
 
     try {
       if (isActive) {
@@ -322,14 +321,15 @@ export async function PUT(request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Update service error:", error);
+    console.error("Update service status error:", error); // Changed error message for clarity
     return NextResponse.json(
-      { success: false, error: "خطا در بروزرسانی سرویس" },
+      { success: false, error: "خطا در بروزرسانی وضعیت سرویس" },
       { status: 500 }
     );
   }
 }
 
+// DELETE function remains the same as in Phase 3 (New)
 export async function DELETE(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];

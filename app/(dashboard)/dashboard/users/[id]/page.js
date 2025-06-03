@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import DashboardLayout from "@/components/dashboard/dashboard-layout";
-import { Copy, Edit3 } from "lucide-react";
+import { Copy, Edit3, CalendarClock } from "lucide-react"; // Added CalendarClock
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -31,23 +31,27 @@ import {
 
 export default function UserDetails({ params }) {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState(null); // Logged-in admin user
-  const [userData, setUserData] = useState(null); // The user whose details are being viewed
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
+  const [isSubmittingServiceDate, setIsSubmittingServiceDate] = useState(false);
 
   const [editIsPremium, setEditIsPremium] = useState(false);
   const [editPremiumExpiryDate, setEditPremiumExpiryDate] = useState("");
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isPremiumEditDialogOpen, setIsPremiumEditDialogOpen] = useState(false);
+
+  // State for editing service_activated_at
+  const [editingServiceForDate, setEditingServiceForDate] = useState(null);
+  const [editServiceActivatedAt, setEditServiceActivatedAt] = useState("");
+  const [isServiceDateDialogOpen, setIsServiceDateDialogOpen] = useState(false);
 
   const fetchSpecificUserData = async () => {
-    // Renamed to avoid confusion
     try {
       const userDetails = await UserService.getUserDetails(params.id);
       if (userDetails) {
         setUserData({
           ...userDetails,
-          // Ensure services and their channel lists are properly parsed if they come as JSON strings
           services: (userDetails.services || []).map((service) => ({
             ...service,
             source_channels: Array.isArray(service.source_channels)
@@ -71,8 +75,6 @@ export default function UserDetails({ params }) {
         );
       } else {
         toast.error("کاربر مورد نظر یافت نشد.");
-        // Optionally redirect if user not found, or handle in UI
-        // router.replace('/dashboard/users');
       }
     } catch (error) {
       console.error("Error loading user details:", error);
@@ -89,25 +91,21 @@ export default function UserDetails({ params }) {
           router.replace("/login");
           return;
         }
-
-        const loggedInUser = AuthService.getStoredUser(); // Get the currently logged-in user
+        const loggedInUser = AuthService.getStoredUser();
         if (!loggedInUser?.isAdmin) {
           toast.error("دسترسی غیر مجاز. شما ادمین نیستید.");
           router.replace("/dashboard");
           return;
         }
-        setCurrentUser(loggedInUser); // Set the admin user for the layout
-        await fetchSpecificUserData(); // Fetch the details of the user specified by params.id
+        setCurrentUser(loggedInUser);
+        await fetchSpecificUserData();
       } catch (error) {
         console.error("Auth or data loading error:", error);
         toast.error("خطا در بارگذاری صفحه");
-        // Potentially redirect to a general error page or dashboard
-        // router.replace('/dashboard');
       } finally {
         setLoading(false);
       }
     };
-
     checkAuthAndLoadData();
   }, [router, params.id]);
 
@@ -142,7 +140,7 @@ export default function UserDetails({ params }) {
       if (result.success) {
         toast.success("وضعیت پرمیوم کاربر با موفقیت بروزرسانی شد.");
         await fetchSpecificUserData();
-        setIsEditDialogOpen(false);
+        setIsPremiumEditDialogOpen(false);
       } else {
         toast.error(result.error || "خطا در بروزرسانی وضعیت پرمیوم.");
       }
@@ -151,6 +149,54 @@ export default function UserDetails({ params }) {
       toast.error("خطای ناشناخته در بروزرسانی وضعیت پرمیوم.");
     } finally {
       setIsSubmittingPremium(false);
+    }
+  };
+
+  const openEditServiceDateDialog = (service) => {
+    setEditingServiceForDate(service);
+    setEditServiceActivatedAt(
+      service.service_activated_at
+        ? new Date(service.service_activated_at).toISOString().split("T")[0]
+        : ""
+    );
+    setIsServiceDateDialogOpen(true);
+  };
+
+  const handleServiceDateUpdate = async (e) => {
+    e.preventDefault();
+    if (!editingServiceForDate) return;
+    setIsSubmittingServiceDate(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const response = await fetch(
+        `/api/admin/services/${editingServiceForDate.id}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            service_activated_at: editServiceActivatedAt
+              ? new Date(editServiceActivatedAt).toISOString()
+              : null,
+          }),
+        }
+      );
+      const result = await response.json();
+      if (result.success) {
+        toast.success("تاریخ فعال‌سازی سرویس با موفقیت بروزرسانی شد.");
+        await fetchSpecificUserData();
+        setIsServiceDateDialogOpen(false);
+        setEditingServiceForDate(null);
+      } else {
+        toast.error(result.error || "خطا در بروزرسانی تاریخ فعال‌سازی سرویس.");
+      }
+    } catch (error) {
+      console.error("Failed to update service activation date:", error);
+      toast.error("خطای ناشناخته در بروزرسانی تاریخ فعال‌سازی سرویس.");
+    } finally {
+      setIsSubmittingServiceDate(false);
     }
   };
 
@@ -198,7 +244,10 @@ export default function UserDetails({ params }) {
               <CardTitle>پروفایل کاربر</CardTitle>
               <CardDescription>اطلاعات کامل پروفایل کاربر</CardDescription>
             </div>
-            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <Dialog
+              open={isPremiumEditDialogOpen}
+              onOpenChange={setIsPremiumEditDialogOpen}
+            >
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                   <Edit3 className="ml-2 h-4 w-4" /> ویرایش وضعیت پرمیوم
@@ -306,7 +355,6 @@ export default function UserDetails({ params }) {
                 />
               </div>
             </div>
-
             <div className="space-y-4 mt-6">
               <div>
                 <Label>کلید API جیمنای</Label>
@@ -360,19 +408,38 @@ export default function UserDetails({ params }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Ensure userData and userData.services are available before trying to map */}
-            {userData && userData.services && userData.services.length > 0 ? (
+            {userData.services && userData.services.length > 0 ? (
               <div className="space-y-4">
-                {userData.services.map((service) => (
-                  <Card key={service.id}>
-                    <CardContent className="pt-6">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
+                {userData.services.map((service) => {
+                  let serviceExpiryDate = "-";
+                  if (
+                    !userData.is_premium &&
+                    service.is_active &&
+                    service.service_activated_at
+                  ) {
+                    const expiry = new Date(service.service_activated_at);
+                    expiry.setDate(expiry.getDate() + 15);
+                    serviceExpiryDate = expiry.toLocaleDateString("fa-IR", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    });
+                  } else if (
+                    userData.is_premium &&
+                    userData.premium_expiry_date
+                  ) {
+                    serviceExpiryDate = `مطابق انقضای پرمیوم (${formattedPremiumExpiry})`;
+                  }
+
+                  return (
+                    <Card key={service.id}>
+                      <CardHeader className="flex flex-row justify-between items-start">
+                        <div>
                           <h3 className="text-lg font-semibold">
                             {service.name}
                           </h3>
                           <span
-                            className={`px-2 py-1 rounded-full text-xs ${
+                            className={`px-2 py-0.5 rounded-full text-xs ${
                               service.is_active
                                 ? "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-400"
                                 : "bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-400"
@@ -381,85 +448,113 @@ export default function UserDetails({ params }) {
                             {service.is_active ? "فعال" : "غیرفعال"}
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          نوع سرویس:{" "}
-                          {service.type === "copy"
-                            ? "کپی کانال"
-                            : "فوروارد خودکار"}
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                          <div>
-                            <Label className="text-xs text-muted-foreground">
-                              کانال‌های مبدا
-                            </Label>
-                            {/* Ensure service.source_channels is an array before join */}
-                            <div className="mt-1 text-sm">
-                              {Array.isArray(service.source_channels)
-                                ? service.source_channels.join(", ")
-                                : service.source_channels || ""}
-                            </div>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">
-                              کانال‌های مقصد
-                            </Label>
-                            {/* Ensure service.target_channels is an array before join */}
-                            <div className="mt-1 text-sm">
-                              {Array.isArray(service.target_channels)
-                                ? service.target_channels.join(", ")
-                                : service.target_channels || ""}
-                            </div>
-                          </div>
-                        </div>
-                        {service.prompt_template && (
-                          <div className="mt-2">
-                            <Label className="text-xs text-muted-foreground">
-                              قالب پرامپت هوش مصنوعی
-                            </Label>
-                            <div className="mt-1 p-2 bg-muted rounded-md text-sm whitespace-pre-wrap">
-                              {service.prompt_template}
-                            </div>
-                          </div>
+                        {!userData.is_premium && ( // Only show edit for normal user services
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditServiceDateDialog(service)}
+                          >
+                            <CalendarClock className="ml-2 h-4 w-4" /> ویرایش
+                            تاریخ فعالیت
+                          </Button>
                         )}
-                        {service.type === "copy" && (
-                          <>
-                            <div className="text-sm text-muted-foreground">
-                              کپی تاریخچه:{" "}
-                              {service.copy_history ? "فعال" : "غیرفعال"}
-                            </div>
-                            {service.copy_history && (
-                              <>
-                                <div className="text-sm text-muted-foreground">
-                                  محدودیت کپی: {service.history_limit} پیام
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                  ترتیب انتخاب پیام ها برای کپی:{" "}
-                                  {service.history_direction === "newest"
-                                    ? "جدیدترین ها"
-                                    : "قدیمی ترین ها"}
-                                </div>
-                                {service.start_from_id && (
-                                  <>
-                                    <div className="text-sm text-muted-foreground">
-                                      شروع کپی از شناسه پیام:{" "}
-                                      {service.start_from_id}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">
-                                      جهت کپی نسبت به پیام مرجع:{" "}
-                                      {service.copy_direction === "before"
-                                        ? "پیام های قبل (قدیمی تر)"
-                                        : "پیام های بعد (جدیدتر)"}
-                                    </div>
-                                  </>
-                                )}
-                              </>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <div className="space-y-2">
+                          <p className="text-sm text-muted-foreground">
+                            نوع سرویس:{" "}
+                            {service.type === "copy"
+                              ? "کپی کانال"
+                              : "فوروارد خودکار"}
+                          </p>
+                          {!userData.is_premium &&
+                            service.service_activated_at && (
+                              <p className="text-sm text-muted-foreground">
+                                فعال شده در:{" "}
+                                {new Date(
+                                  service.service_activated_at
+                                ).toLocaleDateString("fa-IR", {
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                })}
+                              </p>
                             )}
-                          </>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                          <p className="text-sm text-muted-foreground">
+                            تاریخ انقضای سرویس: {serviceExpiryDate}
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                            <div>
+                              <Label className="text-xs text-muted-foreground">
+                                کانال‌های مبدا
+                              </Label>
+                              <div className="mt-1 text-sm">
+                                {Array.isArray(service.source_channels)
+                                  ? service.source_channels.join(", ")
+                                  : service.source_channels || ""}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-xs text-muted-foreground">
+                                کانال‌های مقصد
+                              </Label>
+                              <div className="mt-1 text-sm">
+                                {Array.isArray(service.target_channels)
+                                  ? service.target_channels.join(", ")
+                                  : service.target_channels || ""}
+                              </div>
+                            </div>
+                          </div>
+                          {service.prompt_template && (
+                            <div className="mt-2">
+                              <Label className="text-xs text-muted-foreground">
+                                قالب پرامپت هوش مصنوعی
+                              </Label>
+                              <div className="mt-1 p-2 bg-muted rounded-md text-sm whitespace-pre-wrap">
+                                {service.prompt_template}
+                              </div>
+                            </div>
+                          )}
+                          {service.type === "copy" && (
+                            <>
+                              <div className="text-sm text-muted-foreground">
+                                کپی تاریخچه:{" "}
+                                {service.copy_history ? "فعال" : "غیرفعال"}
+                              </div>
+                              {service.copy_history && (
+                                <>
+                                  <div className="text-sm text-muted-foreground">
+                                    محدودیت کپی: {service.history_limit} پیام
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    ترتیب انتخاب پیام ها برای کپی:{" "}
+                                    {service.history_direction === "newest"
+                                      ? "جدیدترین ها"
+                                      : "قدیمی ترین ها"}
+                                  </div>
+                                  {service.start_from_id && (
+                                    <>
+                                      <div className="text-sm text-muted-foreground">
+                                        شروع کپی از شناسه پیام:{" "}
+                                        {service.start_from_id}
+                                      </div>
+                                      <div className="text-sm text-muted-foreground">
+                                        جهت کپی نسبت به پیام مرجع:{" "}
+                                        {service.copy_direction === "before"
+                                          ? "پیام های قبل (قدیمی تر)"
+                                          : "پیام های بعد (جدیدتر)"}
+                                      </div>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
@@ -468,6 +563,62 @@ export default function UserDetails({ params }) {
             )}
           </CardContent>
         </Card>
+
+        {/* Dialog for Editing Service Activation Date */}
+        {editingServiceForDate && (
+          <Dialog
+            open={isServiceDateDialogOpen}
+            onOpenChange={setIsServiceDateDialogOpen}
+          >
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>ویرایش تاریخ فعال‌سازی سرویس</DialogTitle>
+                <DialogDescription>
+                  تاریخ اولین فعال‌سازی سرویس «{editingServiceForDate.name}» را
+                  تغییر دهید. این تاریخ برای محاسبه انقضای ۱۵ روزه کاربران عادی
+                  استفاده می‌شود.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                onSubmit={handleServiceDateUpdate}
+                className="space-y-4 py-4"
+              >
+                <div>
+                  <Label htmlFor="service_activated_at_edit">
+                    تاریخ اولین فعال‌سازی
+                  </Label>
+                  <Input
+                    id="service_activated_at_edit"
+                    type="date"
+                    value={editServiceActivatedAt}
+                    onChange={(e) => setEditServiceActivatedAt(e.target.value)}
+                    className="mt-1"
+                  />
+                  <p className="text-sm text-muted-foreground mt-1">
+                    تاریخ را خالی بگذارید تا حذف شود (سرویس دیگر منقضی نخواهد شد
+                    مگر اینکه مجدداً فعال شود).
+                  </p>
+                </div>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setEditingServiceForDate(null)}
+                    >
+                      لغو
+                    </Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSubmittingServiceDate}>
+                    {isSubmittingServiceDate
+                      ? "در حال ذخیره..."
+                      : "ذخیره تاریخ"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
     </DashboardLayout>
   );

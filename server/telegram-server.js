@@ -4,6 +4,7 @@ const { Api } = require("telegram");
 const { verifyToken } = require("./utils/auth");
 const { createClient, activeClients } = require("./services/telegram/client");
 const {
+  stopService,
   startUserServices,
   stopUserServices,
   initializeAllServices,
@@ -14,7 +15,7 @@ const {
   cleanExpiredMessages,
 } = require("./services/telegram/message-maps");
 const { API_ID, API_HASH } = require("./config");
-
+const { openDb } = require("./utils/db");
 const app = express();
 
 // Environment configuration
@@ -250,8 +251,80 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
+async function checkAndExpireNormalUserServices() {
+  console.log("🕒 Checking for expired normal user services...");
+  try {
+    const db = await openDb();
+    const now = new Date().toISOString();
+
+    // پیدا کردن کاربرانی که ادمین یا پرمیوم نیستند (یا پرمیومشان منقضی شده)
+    const normalUsers = await db.all(
+      `
+      SELECT id FROM users 
+      WHERE is_admin = 0 AND (is_premium = 0 OR premium_expiry_date IS NULL OR premium_expiry_date < ?)
+    `,
+      [now]
+    );
+
+    if (!normalUsers.length) {
+      console.log("✅ No normal users found to check for service expiry.");
+      return;
+    }
+
+    const normalUserIds = normalUsers.map((u) => u.id);
+
+    // پیدا کردن سرویس‌های فعال کاربران عادی که service_activated_at دارند و 15 روز از آن گذشته است
+    const servicesToExpire = await db.all(
+      `
+      SELECT id, user_id, name FROM forwarding_services
+      WHERE user_id IN (${normalUserIds.map(() => "?").join(",")})
+        AND is_active = 1
+        AND service_activated_at IS NOT NULL
+        AND DATETIME(service_activated_at, '+15 days') < ?
+    `,
+      [...normalUserIds, now]
+    );
+
+    if (servicesToExpire.length > 0) {
+      console.log(`Found ${servicesToExpire.length} services to expire.`);
+      for (const service of servicesToExpire) {
+        console.log(
+          `⏳ Expiring service ID: ${service.id} for user ID: ${service.user_id}, Name: ${service.name}`
+        );
+        await db.run(
+          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [service.id]
+        );
+        // مهم: باید سرویس متوقف شود
+        try {
+          await stopService(service.user_id, service.id);
+          // اطلاع رسانی به کاربر (اختیاری)
+          // await sendNotificationToUser(client, `سرویس "${service.name}" شما منقضی و غیرفعال شد.`);
+          console.log(
+            `🔴 Service ${service.id} for user ${service.user_id} deactivated due to expiry.`
+          );
+        } catch (err) {
+          console.error(`Error stopping expired service ${service.id}:`, err);
+        }
+      }
+      console.log(
+        `✅ ${servicesToExpire.length} services expired successfully.`
+      );
+    } else {
+      console.log("✅ No normal user services to expire at this time.");
+    }
+  } catch (error) {
+    console.error("❌ Error in checkAndExpireNormalUserServices:", error);
+  }
+}
+
 // Initialize all services on server start
 initializeAllServices();
+
+// راه‌اندازی بررسی انقضای سرویس‌ها به صورت دوره‌ای (مثلاً هر ساعت)
+const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 ساعت
+setInterval(checkAndExpireNormalUserServices, EXPIRY_CHECK_INTERVAL);
+checkAndExpireNormalUserServices(); // یکبار هم در ابتدای راه‌اندازی سرور اجرا شود
 
 // Start server
 app.listen(PORT, HOST, () => {
