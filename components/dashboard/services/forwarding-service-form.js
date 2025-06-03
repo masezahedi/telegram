@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useForm, Controller, useFieldArray } from "react-hook-form"; // useFieldArray اضافه شد
+import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import Link from "next/link"; // برای لینک به صفحه تنظیمات
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import {
   CopyCheck,
   MessageSquareText,
   Brain,
+  ExternalLink,
 } from "lucide-react";
 import {
   Select,
@@ -39,7 +41,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription as CardDesc,
+} from "@/components/ui/card"; // Renamed CardDescription import
 
 const formSchema = z.object({
   name: z.string().min(2, {
@@ -66,15 +74,11 @@ const formSchema = z.object({
   promptTemplate: z.string().optional(),
   searchReplaceRules: z
     .array(
-      z
-        .object({
-          search: z.string().optional(),
-          replace: z.string().optional(),
-        })
-        .refine((data) => data.search || data.replace, {
-          message:
-            "حداقل یکی از فیلدهای جستجو یا جایگزینی باید پر شود اگر قانون اضافه شده.",
-        })
+      z.object({
+        search: z.string().optional(),
+        replace: z.string().optional(),
+      })
+      // Removed refine here as filtering happens in onSubmit
     )
     .optional(),
   copyHistory: z.boolean().default(false),
@@ -341,13 +345,12 @@ export default function ForwardingServiceForm({
 
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-8 text-right"
-      >
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        {" "}
+        {/* Removed text-right here, rely on html dir */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-right flex items-center gap-x-2">
+            <CardTitle className="flex items-center gap-x-2">
               <Settings2 className="h-6 w-6 text-primary" />
               تنظیمات اصلی سرویس
             </CardTitle>
@@ -401,82 +404,76 @@ export default function ForwardingServiceForm({
             />
           </CardContent>
         </Card>
-
         {isCopyService && (
           <Alert
             variant="default"
             className="border-primary/50 text-primary dark:border-primary/70 dark:text-primary/90 [&>svg]:text-primary"
           >
             <Info className="h-4 w-4" />
-            <AlertDescription className="text-right">
+            <AlertDescription>
               <strong>توجه:</strong> در حالت "کپی کانال"، فقط یک کانال مبدا و یک
               کانال مقصد مجاز است. برای فوروارد از چندین مبدا به چندین مقصد، از
               نوع "فوروارد خودکار" استفاده کنید.
             </AlertDescription>
           </Alert>
         )}
-
         <Card>
           <CardHeader>
-            <CardTitle className="text-right flex items-center gap-x-2">
+            <CardTitle className="flex items-center gap-x-2">
               <CopyCheck className="h-6 w-6 text-primary" />
               کانال‌های مبدأ و مقصد
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3 rounded-md border p-4">
-              <FormLabel className="text-base font-medium">
+              <FormLabel className="text-base font-medium block text-right">
                 {" "}
                 {isCopyService ? "کانال مبدأ" : "کانال‌های مبدأ"}
               </FormLabel>
-              <FormDescription>
+              <FormDescription className="block text-right">
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {sourceFields.map(
-                (
-                  item,
-                  index // Changed field to item to avoid conflict
-                ) => (
-                  <FormField
-                    key={item.id}
-                    control={form.control}
-                    name={`sourceChannels.${index}`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <div className="flex items-center gap-x-2">
-                          <FormControl>
-                            <Input
-                              placeholder={
-                                isCopyService
-                                  ? "@SourceChannel"
-                                  : "@SourceChannel or multiple"
-                              }
-                              {...controlledField}
-                            />
-                          </FormControl>
-                          {!isCopyService && sourceFields.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => removeSource(index)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )
-              )}
+              {sourceFields.map((item, index) => (
+                <FormField
+                  key={item.id}
+                  control={form.control}
+                  name={`sourceChannels.${index}`}
+                  render={({ field: controlledField }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-x-2">
+                        <FormControl>
+                          <Input
+                            dir="ltr"
+                            placeholder={
+                              isCopyService
+                                ? "@SourceChannel"
+                                : "@SourceChannel or multiple"
+                            }
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        {!isCopyService && sourceFields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeSource(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <FormMessage className="text-right" />
+                    </FormItem>
+                  )}
+                />
+              ))}
               {!isCopyService && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => appendSource({ value: "" })}
+                  onClick={() => appendSource("")}
                   className="w-full gap-x-1"
                 >
                   <Plus className="h-4 w-4" />
@@ -486,57 +483,53 @@ export default function ForwardingServiceForm({
             </div>
 
             <div className="space-y-3 rounded-md border p-4">
-              <FormLabel className="text-base font-medium">
+              <FormLabel className="text-base font-medium block text-right">
                 {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
               </FormLabel>
-              <FormDescription>
+              <FormDescription className="block text-right">
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {targetFields.map(
-                (
-                  item,
-                  index // Changed field to item
-                ) => (
-                  <FormField
-                    key={item.id}
-                    control={form.control}
-                    name={`targetChannels.${index}`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <div className="flex items-center gap-x-2">
-                          <FormControl>
-                            <Input
-                              placeholder={
-                                isCopyService
-                                  ? "@TargetChannel"
-                                  : "@TargetChannel or multiple"
-                              }
-                              {...controlledField}
-                            />
-                          </FormControl>
-                          {!isCopyService && targetFields.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => removeTarget(index)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )
-              )}
+              {targetFields.map((item, index) => (
+                <FormField
+                  key={item.id}
+                  control={form.control}
+                  name={`targetChannels.${index}`}
+                  render={({ field: controlledField }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-x-2">
+                        <FormControl>
+                          <Input
+                            dir="ltr"
+                            placeholder={
+                              isCopyService
+                                ? "@TargetChannel"
+                                : "@TargetChannel or multiple"
+                            }
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        {!isCopyService && targetFields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeTarget(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <FormMessage className="text-right" />
+                    </FormItem>
+                  )}
+                />
+              ))}
               {!isCopyService && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => appendTarget({ value: "" })}
+                  onClick={() => appendTarget("")}
                   className="w-full gap-x-1"
                 >
                   <Plus className="h-4 w-4" />
@@ -546,14 +539,16 @@ export default function ForwardingServiceForm({
             </div>
           </CardContent>
         </Card>
-
         {isCopyService && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-right flex items-center gap-x-2">
+              <CardTitle className="flex items-center gap-x-2">
                 <Copy className="h-5 w-5 text-primary" />
                 تنظیمات کپی تاریخچه
               </CardTitle>
+              <CardDesc>
+                تنظیمات مربوط به نحوه کپی پیام‌های قدیمی کانال.
+              </CardDesc>
             </CardHeader>
             <CardContent className="space-y-6">
               <FormField
@@ -561,7 +556,7 @@ export default function ForwardingServiceForm({
                 name="copyHistory"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                    <div className="space-y-0.5">
+                    <div className="space-y-0.5 text-right">
                       <FormLabel className="text-base">
                         کپی پیام‌های قبلی
                       </FormLabel>
@@ -571,6 +566,7 @@ export default function ForwardingServiceForm({
                     </div>
                     <FormControl>
                       <Switch
+                        dir="ltr"
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
@@ -588,6 +584,7 @@ export default function ForwardingServiceForm({
                         <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
                         <FormControl>
                           <Input
+                            dir="ltr"
                             type="number"
                             min="1"
                             max="10000"
@@ -607,6 +604,7 @@ export default function ForwardingServiceForm({
                       <FormItem className="space-y-2">
                         <FormLabel>ترتیب انتخاب پیام‌ها</FormLabel>
                         <RadioGroup
+                          dir="rtl"
                           onValueChange={field.onChange}
                           defaultValue={field.value}
                           className="flex flex-col space-y-1"
@@ -645,6 +643,7 @@ export default function ForwardingServiceForm({
                           <FormLabel>شناسه پیام شروع</FormLabel>
                           <FormControl>
                             <Input
+                              dir="ltr"
                               type="text"
                               placeholder="شناسه عددی پیام"
                               {...field}
@@ -662,6 +661,7 @@ export default function ForwardingServiceForm({
                           <FormItem className="space-y-2">
                             <FormLabel>جهت کپی</FormLabel>
                             <RadioGroup
+                              dir="rtl"
                               onValueChange={field.onChange}
                               defaultValue={field.value}
                               className="flex flex-col space-y-1"
@@ -694,13 +694,15 @@ export default function ForwardingServiceForm({
             </CardContent>
           </Card>
         )}
-
         <Card>
           <CardHeader>
-            <CardTitle className="text-right flex items-center gap-x-2">
+            <CardTitle className="flex items-center gap-x-2">
               <Brain className="h-5 w-5 text-primary" />
               تنظیمات هوش مصنوعی
             </CardTitle>
+            <CardDesc>
+              از هوش مصنوعی برای بهبود و تغییر محتوای پیام‌ها استفاده کنید.
+            </CardDesc>
           </CardHeader>
           <CardContent className="space-y-6">
             <FormField
@@ -708,8 +710,8 @@ export default function ForwardingServiceForm({
               name="useAI"
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">
+                  <div className="space-y-0.5 text-right">
+                    <FormLabel htmlFor="useAI-switch" className="text-base">
                       استفاده از هوش مصنوعی
                     </FormLabel>
                     <FormDescription>
@@ -718,6 +720,7 @@ export default function ForwardingServiceForm({
                   </div>
                   <FormControl>
                     <Switch
+                      dir="ltr"
                       id="useAI-switch"
                       checked={field.value}
                       onCheckedChange={field.onChange}
@@ -735,9 +738,9 @@ export default function ForwardingServiceForm({
                   برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در بخش{" "}
                   <Link
                     href="/dashboard/settings"
-                    className="font-semibold underline hover:text-destructive/80"
+                    className="font-semibold underline hover:text-destructive/80 inline-flex items-center gap-x-1"
                   >
-                    تنظیمات
+                    تنظیمات <ExternalLink className="h-3 w-3" />
                   </Link>{" "}
                   وارد کنید.
                 </AlertDescription>
@@ -769,75 +772,70 @@ export default function ForwardingServiceForm({
             )}
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
-            <CardTitle className="text-right flex items-center gap-x-2">
+            <CardTitle className="flex items-center gap-x-2">
               <MessageSquareText className="h-5 w-5 text-primary" />
               جایگزینی متن
             </CardTitle>
+            <CardDesc>قوانین جستجو و جایگزینی عبارات در متن پیام‌ها.</CardDesc>
           </CardHeader>
           <CardContent className="space-y-4">
-            <FormDescription>
-              قوانینی برای جستجو و جایگزینی عبارات خاص در متن پیام‌ها تعریف
-              کنید.
-            </FormDescription>
-            {ruleFields.map(
-              (
-                item,
-                index // Changed field to item
-              ) => (
-                <div
-                  key={item.id}
-                  className="flex items-start gap-x-2 p-3 border rounded-md bg-muted/20"
-                >
-                  <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                    <FormField
-                      control={form.control}
-                      name={`searchReplaceRules.${index}.search`}
-                      render={({ field: controlledField }) => (
-                        <FormItem>
-                          <FormLabel>متن جستجو</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="عبارتی که می‌خواهید پیدا شود"
-                              {...controlledField}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name={`searchReplaceRules.${index}.replace`}
-                      render={({ field: controlledField }) => (
-                        <FormItem>
-                          <FormLabel>متن جایگزین</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
-                              {...controlledField}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeRule(index)}
-                    className="mt-auto text-destructive hover:text-destructive/80 self-end sm:self-center shrink-0"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span className="sr-only">حذف قانون</span>
-                  </Button>
+            {ruleFields.map((item, index) => (
+              <div
+                key={item.id}
+                className="flex items-end gap-x-2 p-3 border rounded-md bg-muted/20"
+              >
+                {" "}
+                {/* Changed items-start to items-end */}
+                <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.search`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جستجو</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="عبارتی که می‌خواهید پیدا شود"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.replace`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جایگزین</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
-              )
-            )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeRule(index)}
+                  className="text-destructive hover:text-destructive/80 shrink-0"
+                >
+                  {" "}
+                  {/* Removed self-end/center */}
+                  <Trash2 className="h-4 w-4" />
+                  <span className="sr-only">حذف قانون</span>
+                </Button>
+              </div>
+            ))}
             <Button
               type="button"
               variant="outline"
@@ -850,8 +848,9 @@ export default function ForwardingServiceForm({
             </Button>
           </CardContent>
         </Card>
-
-        <div className="flex justify-end pt-4">
+        <div className="flex justify-start pt-4">
+          {" "}
+          {/* Changed to justify-start for RTL */}
           <Button
             type="submit"
             size="lg"

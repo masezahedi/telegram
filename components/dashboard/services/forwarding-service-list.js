@@ -4,8 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-// MessageCircle به لیست ایمپورت‌ها اضافه شده است
-import { Plus, Pencil, Trash2, Info, Eye, MessageCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react"; // Eye removed as it wasn't used
 import {
   Table,
   TableBody,
@@ -172,6 +171,8 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     <TooltipProvider delayDuration={100}>
       <div className="space-y-4">
         <div className="flex justify-start">
+          {" "}
+          {/* دکمه در سمت راست در RTL */}
           <Button
             onClick={() => setShowForm(true)}
             className="gap-x-2"
@@ -194,37 +195,41 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
 
         {services.length === 0 && !loading ? (
           <div className="text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg mt-4">
-            <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />{" "}
-            {/* استفاده از MessageCircle */}
+            <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />
             <p className="font-semibold">هیچ سرویسی یافت نشد.</p>
             <p className="text-sm">برای شروع، یک سرویس جدید ایجاد کنید.</p>
           </div>
         ) : (
           <div className="rounded-md border overflow-x-auto">
             <Table className="min-w-full">
-              <TableCaption className="py-4">
+              <TableCaption className="py-4 text-center">
                 لیست سرویس‌های فوروارد و کپی شما.
               </TableCaption>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-right w-[200px]">
+                  {/* ترتیب ستون‌ها برای RTL: عملیات (چپ‌ترین در نمایش LTR) باید اول تعریف شود اگر می‌خواهید راست‌ترین باشد */}
+                  {/* یا اینکه ترتیب فعلی را حفظ کنید و مطمئن شوید محتوا text-right است */}
+                  {/* ترتیب فعلی با فرض اینکه dir="rtl" کار خودش را می‌کند: */}
+                  <TableHead className="text-right w-[200px] ps-4">
                     نام سرویس
-                  </TableHead>
+                  </TableHead>{" "}
+                  {/* ps-4 for padding-start */}
                   <TableHead className="text-right w-[150px]">
                     نوع سرویس
                   </TableHead>
                   <TableHead className="text-right">کانال‌های مبدا</TableHead>
                   <TableHead className="text-right">کانال‌های مقصد</TableHead>
                   <TableHead className="text-right w-[100px]">وضعیت</TableHead>
-                  <TableHead className="text-center w-[120px]">
+                  <TableHead className="text-center w-[120px] pe-4">
                     عملیات
-                  </TableHead>
+                  </TableHead>{" "}
+                  {/* pe-4 for padding-end */}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {services.map((service) => (
                   <TableRow key={service.id} className="hover:bg-muted/50">
-                    <TableCell className="text-right font-medium py-3">
+                    <TableCell className="text-right font-medium py-3 ps-4">
                       {service.name}
                     </TableCell>
                     <TableCell className="text-right py-3">
@@ -249,15 +254,15 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                             ).join("، ")}
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-right">
-                            {(Array.isArray(service.source_channels)
-                              ? service.source_channels
-                              : []
-                            ).map((ch) => (
-                              <div key={ch}>{ch}</div>
-                            ))}
-                          </p>
+                        <TooltipContent className="text-right">
+                          {" "}
+                          {/* اطمینان از راست‌چین بودن محتوای تولتیپ */}
+                          {(Array.isArray(service.source_channels)
+                            ? service.source_channels
+                            : []
+                          ).map((ch) => (
+                            <div key={ch}>{ch}</div>
+                          ))}
                         </TooltipContent>
                       </Tooltip>
                     </TableCell>
@@ -271,15 +276,13 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                             ).join("، ")}
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-right">
-                            {(Array.isArray(service.target_channels)
-                              ? service.target_channels
-                              : []
-                            ).map((ch) => (
-                              <div key={ch}>{ch}</div>
-                            ))}
-                          </p>
+                        <TooltipContent className="text-right">
+                          {(Array.isArray(service.target_channels)
+                            ? service.target_channels
+                            : []
+                          ).map((ch) => (
+                            <div key={ch}>{ch}</div>
+                          ))}
                         </TooltipContent>
                       </Tooltip>
                     </TableCell>
@@ -295,9 +298,10 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                           !userAccountStatus?.isAdmin
                         }
                         aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
+                        dir="ltr" // سوییچ معمولا ظاهر LTR دارد
                       />
                     </TableCell>
-                    <TableCell className="text-center py-3">
+                    <TableCell className="text-center py-3 pe-4">
                       <div className="flex justify-center gap-x-1">
                         <Tooltip>
                           <TooltipTrigger asChild>
