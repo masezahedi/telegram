@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import Link from "next/link"; // برای لینک به صفحه تنظیمات
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +48,7 @@ import {
   CardHeader,
   CardTitle,
   CardDescription as CardDesc,
-} from "@/components/ui/card"; // Renamed CardDescription import
+} from "@/components/ui/card";
 
 const formSchema = z.object({
   name: z.string().min(2, {
@@ -79,7 +79,6 @@ const formSchema = z.object({
         search: z.string().optional(),
         replace: z.string().optional(),
       })
-      // Removed refine here as filtering happens in onSubmit
     )
     .optional(),
   copyHistory: z.boolean().default(false),
@@ -98,6 +97,13 @@ const formSchema = z.object({
   copyDirection: z.enum(["before", "after"]).optional(),
 });
 
+const ensureAtLeastOne = (arr, defaultValue = "") => {
+  const validItems = Array.isArray(arr)
+    ? arr.filter((item) => typeof item === "string" && item.trim() !== "")
+    : [];
+  return validItems.length > 0 ? validItems : [defaultValue];
+};
+
 export default function ForwardingServiceForm({
   service,
   onSuccess,
@@ -107,47 +113,43 @@ export default function ForwardingServiceForm({
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [isTelegramConnected, setIsTelegramConnected] = useState(false);
 
+  const initialSourceChannels = service?.source_channels
+    ? ensureAtLeastOne(
+        Array.isArray(service.source_channels)
+          ? service.source_channels
+          : JSON.parse(service.source_channels || "[]")
+      )
+    : [""];
+  const initialTargetChannels = service?.target_channels
+    ? ensureAtLeastOne(
+        Array.isArray(service.target_channels)
+          ? service.target_channels
+          : JSON.parse(service.target_channels || "[]")
+      )
+    : [""];
+  const initialSearchReplaceRules = service?.search_replace_rules
+    ? (Array.isArray(service.search_replace_rules)
+        ? service.search_replace_rules
+        : JSON.parse(service.search_replace_rules || "[]")
+      ).length > 0
+      ? Array.isArray(service.search_replace_rules)
+        ? service.search_replace_rules
+        : JSON.parse(service.search_replace_rules || "[]")
+      : [{ search: "", replace: "" }]
+    : [{ search: "", replace: "" }];
+
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: service?.name || "",
       type: service?.type || "forward",
-      sourceChannels: service?.source_channels
-        ? (Array.isArray(service.source_channels)
-            ? service.source_channels
-            : JSON.parse(service.source_channels || '[""]')
-          ).filter(Boolean).length > 0
-          ? (Array.isArray(service.source_channels)
-              ? service.source_channels
-              : JSON.parse(service.source_channels || '[""]')
-            ).filter(Boolean)
-          : [""]
-        : [""],
-      targetChannels: service?.target_channels
-        ? (Array.isArray(service.target_channels)
-            ? service.target_channels
-            : JSON.parse(service.target_channels || '[""]')
-          ).filter(Boolean).length > 0
-          ? (Array.isArray(service.target_channels)
-              ? service.target_channels
-              : JSON.parse(service.target_channels || '[""]')
-            ).filter(Boolean)
-          : [""]
-        : [""],
+      sourceChannels: initialSourceChannels,
+      targetChannels: initialTargetChannels,
       useAI: Boolean(service?.prompt_template),
       promptTemplate:
         service?.prompt_template ||
         "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
-      searchReplaceRules: service?.search_replace_rules
-        ? (Array.isArray(service.search_replace_rules)
-            ? service.search_replace_rules
-            : JSON.parse(service.search_replace_rules || "[]")
-          ).length > 0
-          ? Array.isArray(service.search_replace_rules)
-            ? service.search_replace_rules
-            : JSON.parse(service.search_replace_rules || "[]")
-          : [{ search: "", replace: "" }]
-        : [{ search: "", replace: "" }],
+      searchReplaceRules: initialSearchReplaceRules,
       copyHistory: Boolean(service?.copy_history),
       historyLimit: service?.history_limit || 100,
       historyDirection: service?.history_direction || "newest",
@@ -155,6 +157,9 @@ export default function ForwardingServiceForm({
       copyDirection: service?.copy_direction || "before",
     },
   });
+
+  const serviceType = form.watch("type");
+  const isCopyService = serviceType === "copy";
 
   useEffect(() => {
     const checkRequirements = async () => {
@@ -165,6 +170,35 @@ export default function ForwardingServiceForm({
     };
     checkRequirements();
   }, []);
+
+  useEffect(() => {
+    const currentSource = form.getValues("sourceChannels");
+    const currentTarget = form.getValues("targetChannels");
+
+    if (isCopyService) {
+      if (
+        currentSource.length > 1 ||
+        currentSource[0] === undefined ||
+        currentSource.length === 0
+      ) {
+        form.setValue("sourceChannels", [
+          currentSource.length > 0 ? currentSource[0] || "" : "",
+        ]);
+      }
+      if (
+        currentTarget.length > 1 ||
+        currentTarget[0] === undefined ||
+        currentTarget.length === 0
+      ) {
+        form.setValue("targetChannels", [
+          currentTarget.length > 0 ? currentTarget[0] || "" : "",
+        ]);
+      }
+    } else {
+      if (currentSource.length === 0) form.setValue("sourceChannels", [""]);
+      if (currentTarget.length === 0) form.setValue("targetChannels", [""]);
+    }
+  }, [isCopyService, form]);
 
   const {
     fields: sourceFields,
@@ -204,8 +238,17 @@ export default function ForwardingServiceForm({
       return;
     }
 
-    const finalSourceChannels = values.sourceChannels.filter(Boolean);
-    const finalTargetChannels = values.targetChannels.filter(Boolean);
+    let finalSourceChannels = values.sourceChannels
+      .map((s) => (typeof s === "string" ? s : ""))
+      .filter(Boolean);
+    let finalTargetChannels = values.targetChannels
+      .map((t) => (typeof t === "string" ? t : ""))
+      .filter(Boolean);
+
+    if (values.type === "copy") {
+      finalSourceChannels = finalSourceChannels.slice(0, 1);
+      finalTargetChannels = finalTargetChannels.slice(0, 1);
+    }
 
     if (finalSourceChannels.length === 0) {
       form.setError("sourceChannels.0", {
@@ -223,14 +266,9 @@ export default function ForwardingServiceForm({
     }
 
     if (values.type === "copy") {
-      if (finalSourceChannels.length > 1) {
-        toast.error("در حالت کپی کانال، فقط یک کانال مبدا مجاز است");
-        return;
-      }
-      if (finalTargetChannels.length > 1) {
-        toast.error("در حالت کپی کانال، فقط یک کانال مقصد مجاز است");
-        return;
-      }
+      // این بررسی برای حالت کپی که بالاتر انجام شد کفایت می‌کند
+      // if (finalSourceChannels.length > 1) { toast.error("در حالت کپی کانال، فقط یک کانال مبدا مجاز است"); return; }
+      // if (finalTargetChannels.length > 1) { toast.error("در حالت کپی کانال، فقط یک کانال مقصد مجاز است"); return; }
       if (values.startFromId && values.startFromId.trim()) {
         const messageId = parseInt(values.startFromId.trim(), 10);
         if (isNaN(messageId) || messageId <= 0) {
@@ -250,7 +288,7 @@ export default function ForwardingServiceForm({
         targetChannels: finalTargetChannels.map((channel) =>
           channel.trim().startsWith("@") ? channel.trim() : `@${channel.trim()}`
         ),
-        searchReplaceRules: values.searchReplaceRules.filter(
+        searchReplaceRules: (values.searchReplaceRules || []).filter(
           (rule) => rule.search || rule.replace
         ),
         promptTemplate: values.useAI ? values.promptTemplate : "",
@@ -305,8 +343,6 @@ export default function ForwardingServiceForm({
     }
   };
 
-  const serviceType = form.watch("type");
-  const isCopyService = serviceType === "copy";
   const copyHistoryEnabled = form.watch("copyHistory");
   const startFromIdWatched = form.watch("startFromId");
 
@@ -350,8 +386,6 @@ export default function ForwardingServiceForm({
         onSubmit={form.handleSubmit(onSubmit)}
         className="space-y-8 dir-rtl"
       >
-        {" "}
-        {/* Removed text-right here, rely on html dir */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-x-2">
@@ -408,6 +442,7 @@ export default function ForwardingServiceForm({
             />
           </CardContent>
         </Card>
+
         {isCopyService && (
           <Alert
             variant="default"
@@ -421,6 +456,7 @@ export default function ForwardingServiceForm({
             </AlertDescription>
           </Alert>
         )}
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-x-2">
@@ -451,7 +487,7 @@ export default function ForwardingServiceForm({
                             placeholder={
                               isCopyService
                                 ? "@SourceChannel"
-                                : "@SourceChannel or multiple"
+                                : "@SourceChannel"
                             }
                             {...controlledField}
                           />
@@ -507,7 +543,7 @@ export default function ForwardingServiceForm({
                             placeholder={
                               isCopyService
                                 ? "@TargetChannel"
-                                : "@TargetChannel or multiple"
+                                : "@TargetChannel"
                             }
                             {...controlledField}
                           />
@@ -543,6 +579,7 @@ export default function ForwardingServiceForm({
             </div>
           </CardContent>
         </Card>
+
         {isCopyService && (
           <Card>
             <CardHeader>
@@ -698,6 +735,7 @@ export default function ForwardingServiceForm({
             </CardContent>
           </Card>
         )}
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-x-2">
@@ -776,6 +814,7 @@ export default function ForwardingServiceForm({
             )}
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-x-2">
@@ -790,8 +829,6 @@ export default function ForwardingServiceForm({
                 key={item.id}
                 className="flex items-end gap-x-2 p-3 border rounded-md bg-muted/20"
               >
-                {" "}
-                {/* Changed items-start to items-end */}
                 <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                   <FormField
                     control={form.control}
@@ -801,6 +838,7 @@ export default function ForwardingServiceForm({
                         <FormLabel>متن جستجو</FormLabel>
                         <FormControl>
                           <Input
+                            dir="rtl"
                             placeholder="عبارتی که می‌خواهید پیدا شود"
                             {...controlledField}
                           />
@@ -817,6 +855,7 @@ export default function ForwardingServiceForm({
                         <FormLabel>متن جایگزین</FormLabel>
                         <FormControl>
                           <Input
+                            dir="rtl"
                             placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
                             {...controlledField}
                           />
@@ -833,8 +872,6 @@ export default function ForwardingServiceForm({
                   onClick={() => removeRule(index)}
                   className="text-destructive hover:text-destructive/80 shrink-0"
                 >
-                  {" "}
-                  {/* Removed self-end/center */}
                   <Trash2 className="h-4 w-4" />
                   <span className="sr-only">حذف قانون</span>
                 </Button>
@@ -852,9 +889,8 @@ export default function ForwardingServiceForm({
             </Button>
           </CardContent>
         </Card>
+
         <div className="flex justify-start pt-4">
-          {" "}
-          {/* Changed to justify-start for RTL */}
           <Button
             type="submit"
             size="lg"
