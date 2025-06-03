@@ -19,6 +19,7 @@ import {
   MessageSquareText,
   Brain,
   ExternalLink,
+  Copy,
 } from "lucide-react";
 import {
   Select,
