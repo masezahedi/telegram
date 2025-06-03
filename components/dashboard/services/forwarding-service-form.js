@@ -97,11 +97,19 @@ const formSchema = z.object({
   copyDirection: z.enum(["before", "after"]).optional(),
 });
 
-const ensureAtLeastOne = (arr, defaultValue = "") => {
-  const validItems = Array.isArray(arr)
-    ? arr.filter((item) => typeof item === "string" && item.trim() !== "")
-    : [];
-  return validItems.length > 0 ? validItems : [defaultValue];
+// Helper to ensure array has at least one item, defaulting to empty string
+const ensureInitialArrayField = (fieldValue) => {
+  if (Array.isArray(fieldValue)) {
+    const filtered = fieldValue.filter(
+      (item) => typeof item === "string" && item.trim() !== ""
+    );
+    return filtered.length > 0 ? filtered : [""];
+  }
+  if (typeof fieldValue === "string" && fieldValue.trim() !== "") {
+    // Handle case where service might have single string
+    return [fieldValue];
+  }
+  return [""]; // Default for new forms or empty/invalid data
 };
 
 export default function ForwardingServiceForm({
@@ -113,43 +121,39 @@ export default function ForwardingServiceForm({
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [isTelegramConnected, setIsTelegramConnected] = useState(false);
 
-  const initialSourceChannels = service?.source_channels
-    ? ensureAtLeastOne(
-        Array.isArray(service.source_channels)
-          ? service.source_channels
-          : JSON.parse(service.source_channels || "[]")
-      )
-    : [""];
-  const initialTargetChannels = service?.target_channels
-    ? ensureAtLeastOne(
-        Array.isArray(service.target_channels)
-          ? service.target_channels
-          : JSON.parse(service.target_channels || "[]")
-      )
-    : [""];
-  const initialSearchReplaceRules = service?.search_replace_rules
-    ? (Array.isArray(service.search_replace_rules)
-        ? service.search_replace_rules
-        : JSON.parse(service.search_replace_rules || "[]")
-      ).length > 0
-      ? Array.isArray(service.search_replace_rules)
-        ? service.search_replace_rules
-        : JSON.parse(service.search_replace_rules || "[]")
-      : [{ search: "", replace: "" }]
-    : [{ search: "", replace: "" }];
-
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: service?.name || "",
       type: service?.type || "forward",
-      sourceChannels: initialSourceChannels,
-      targetChannels: initialTargetChannels,
+      sourceChannels: ensureInitialArrayField(
+        service?.source_channels
+          ? Array.isArray(service.source_channels)
+            ? service.source_channels
+            : JSON.parse(service.source_channels || '[""]')
+          : [""]
+      ),
+      targetChannels: ensureInitialArrayField(
+        service?.target_channels
+          ? Array.isArray(service.target_channels)
+            ? service.target_channels
+            : JSON.parse(service.target_channels || '[""]')
+          : [""]
+      ),
       useAI: Boolean(service?.prompt_template),
       promptTemplate:
         service?.prompt_template ||
         "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
-      searchReplaceRules: initialSearchReplaceRules,
+      searchReplaceRules: service?.search_replace_rules
+        ? (Array.isArray(service.search_replace_rules)
+            ? service.search_replace_rules
+            : JSON.parse(service.search_replace_rules || "[]")
+          ).length > 0
+          ? Array.isArray(service.search_replace_rules)
+            ? service.search_replace_rules
+            : JSON.parse(service.search_replace_rules || "[]")
+          : [{ search: "", replace: "" }]
+        : [{ search: "", replace: "" }],
       copyHistory: Boolean(service?.copy_history),
       historyLimit: service?.history_limit || 100,
       historyDirection: service?.history_direction || "newest",
@@ -160,6 +164,24 @@ export default function ForwardingServiceForm({
 
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
+
+  const {
+    fields: sourceFields,
+    append: appendSource,
+    remove: removeSource,
+    replace: replaceSource,
+  } = useFieldArray({ control: form.control, name: "sourceChannels" });
+  const {
+    fields: targetFields,
+    append: appendTarget,
+    remove: removeTarget,
+    replace: replaceTarget,
+  } = useFieldArray({ control: form.control, name: "targetChannels" });
+  const {
+    fields: ruleFields,
+    append: appendRule,
+    remove: removeRule,
+  } = useFieldArray({ control: form.control, name: "searchReplaceRules" });
 
   useEffect(() => {
     const checkRequirements = async () => {
@@ -172,49 +194,35 @@ export default function ForwardingServiceForm({
   }, []);
 
   useEffect(() => {
-    const currentSource = form.getValues("sourceChannels");
-    const currentTarget = form.getValues("targetChannels");
+    const currentSourceChannels = form.getValues("sourceChannels");
+    const currentTargetChannels = form.getValues("targetChannels");
 
     if (isCopyService) {
-      if (
-        currentSource.length > 1 ||
-        currentSource[0] === undefined ||
-        currentSource.length === 0
-      ) {
-        form.setValue("sourceChannels", [
-          currentSource.length > 0 ? currentSource[0] || "" : "",
-        ]);
-      }
-      if (
-        currentTarget.length > 1 ||
-        currentTarget[0] === undefined ||
-        currentTarget.length === 0
-      ) {
-        form.setValue("targetChannels", [
-          currentTarget.length > 0 ? currentTarget[0] || "" : "",
-        ]);
-      }
+      // For "copy" type, ensure exactly one source and one target channel field.
+      // Use the first existing value if available, otherwise an empty string.
+      const firstSource = currentSourceChannels?.[0] || "";
+      const firstTarget = currentTargetChannels?.[0] || "";
+      replaceSource([firstSource]); // replace expects an array of new field values
+      replaceTarget([firstTarget]);
     } else {
-      if (currentSource.length === 0) form.setValue("sourceChannels", [""]);
-      if (currentTarget.length === 0) form.setValue("targetChannels", [""]);
+      // For "forward" type, if fields are empty (e.g., after switching from copy and deleting), ensure at least one.
+      if (sourceFields.length === 0) {
+        appendSource("");
+      }
+      if (targetFields.length === 0) {
+        appendTarget("");
+      }
     }
-  }, [isCopyService, form]);
-
-  const {
-    fields: sourceFields,
-    append: appendSource,
-    remove: removeSource,
-  } = useFieldArray({ control: form.control, name: "sourceChannels" });
-  const {
-    fields: targetFields,
-    append: appendTarget,
-    remove: removeTarget,
-  } = useFieldArray({ control: form.control, name: "targetChannels" });
-  const {
-    fields: ruleFields,
-    append: appendRule,
-    remove: removeRule,
-  } = useFieldArray({ control: form.control, name: "searchReplaceRules" });
+  }, [
+    isCopyService,
+    form,
+    replaceSource,
+    replaceTarget,
+    appendSource,
+    appendTarget,
+    sourceFields.length,
+    targetFields.length,
+  ]); // Added sourceFields.length and targetFields.length
 
   const onSubmit = async (values) => {
     if (!isTelegramConnected) {
@@ -266,9 +274,6 @@ export default function ForwardingServiceForm({
     }
 
     if (values.type === "copy") {
-      // این بررسی برای حالت کپی که بالاتر انجام شد کفایت می‌کند
-      // if (finalSourceChannels.length > 1) { toast.error("در حالت کپی کانال، فقط یک کانال مبدا مجاز است"); return; }
-      // if (finalTargetChannels.length > 1) { toast.error("در حالت کپی کانال، فقط یک کانال مقصد مجاز است"); return; }
       if (values.startFromId && values.startFromId.trim()) {
         const messageId = parseInt(values.startFromId.trim(), 10);
         if (isNaN(messageId) || messageId <= 0) {
@@ -465,6 +470,7 @@ export default function ForwardingServiceForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Source Channels Section */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium block text-right">
                 {" "}
@@ -473,41 +479,59 @@ export default function ForwardingServiceForm({
               <FormDescription className="block text-right">
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {sourceFields.map((item, index) => (
-                <FormField
-                  key={item.id}
-                  control={form.control}
-                  name={`sourceChannels.${index}`}
-                  render={({ field: controlledField }) => (
-                    <FormItem>
-                      <div className="flex items-center gap-x-2">
-                        <FormControl>
-                          <Input
-                            dir="ltr"
-                            placeholder={
-                              isCopyService
-                                ? "@SourceChannel"
-                                : "@SourceChannel"
-                            }
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        {!isCopyService && sourceFields.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => removeSource(index)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      <FormMessage className="text-right" />
-                    </FormItem>
-                  )}
-                />
-              ))}
+              {isCopyService
+                ? // Only render the first field for copy service type
+                  sourceFields.length > 0 && ( // Ensure field exists before rendering
+                    <FormField
+                      control={form.control}
+                      name={`sourceChannels.0`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <div className="flex items-center gap-x-2">
+                            <FormControl>
+                              <Input
+                                dir="ltr"
+                                placeholder="@SourceChannel"
+                                {...controlledField}
+                              />
+                            </FormControl>
+                          </div>
+                          <FormMessage className="text-right" />
+                        </FormItem>
+                      )}
+                    />
+                  )
+                : sourceFields.map((item, index) => (
+                    <FormField
+                      key={item.id}
+                      control={form.control}
+                      name={`sourceChannels.${index}`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <div className="flex items-center gap-x-2">
+                            <FormControl>
+                              <Input
+                                dir="ltr"
+                                placeholder="@SourceChannel"
+                                {...controlledField}
+                              />
+                            </FormControl>
+                            {sourceFields.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => removeSource(index)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <FormMessage className="text-right" />
+                        </FormItem>
+                      )}
+                    />
+                  ))}
               {!isCopyService && (
                 <Button
                   type="button"
@@ -522,6 +546,7 @@ export default function ForwardingServiceForm({
               )}
             </div>
 
+            {/* Target Channels Section */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium block text-right">
                 {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
@@ -529,41 +554,59 @@ export default function ForwardingServiceForm({
               <FormDescription className="block text-right">
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {targetFields.map((item, index) => (
-                <FormField
-                  key={item.id}
-                  control={form.control}
-                  name={`targetChannels.${index}`}
-                  render={({ field: controlledField }) => (
-                    <FormItem>
-                      <div className="flex items-center gap-x-2">
-                        <FormControl>
-                          <Input
-                            dir="ltr"
-                            placeholder={
-                              isCopyService
-                                ? "@TargetChannel"
-                                : "@TargetChannel"
-                            }
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        {!isCopyService && targetFields.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => removeTarget(index)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      <FormMessage className="text-right" />
-                    </FormItem>
-                  )}
-                />
-              ))}
+              {isCopyService
+                ? // Only render the first field for copy service type
+                  targetFields.length > 0 && ( // Ensure field exists
+                    <FormField
+                      control={form.control}
+                      name={`targetChannels.0`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <div className="flex items-center gap-x-2">
+                            <FormControl>
+                              <Input
+                                dir="ltr"
+                                placeholder="@TargetChannel"
+                                {...controlledField}
+                              />
+                            </FormControl>
+                          </div>
+                          <FormMessage className="text-right" />
+                        </FormItem>
+                      )}
+                    />
+                  )
+                : targetFields.map((item, index) => (
+                    <FormField
+                      key={item.id}
+                      control={form.control}
+                      name={`targetChannels.${index}`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <div className="flex items-center gap-x-2">
+                            <FormControl>
+                              <Input
+                                dir="ltr"
+                                placeholder="@TargetChannel"
+                                {...controlledField}
+                              />
+                            </FormControl>
+                            {targetFields.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => removeTarget(index)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <FormMessage className="text-right" />
+                        </FormItem>
+                      )}
+                    />
+                  ))}
               {!isCopyService && (
                 <Button
                   type="button"
