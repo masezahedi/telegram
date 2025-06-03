@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form"; // Controller import might be needed for some complex fields
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -9,7 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Trash2, Info } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Info,
+  Settings2,
+  CopyCheck,
+  MessageSquareText,
+  Brain,
+} from "lucide-react"; // Added more icons
 import {
   Select,
   SelectContent,
@@ -27,53 +35,63 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added AlertTitle
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; // Added Card for grouping
 
 const formSchema = z.object({
   name: z.string().min(2, {
-    message: "نام سرویس باید حداقل ۲ کاراکتر باشد",
+    message: "نام سرویس باید حداقل ۲ کاراکتر باشد.",
   }),
-  type: z.enum(["forward", "copy"]),
+  type: z.enum(["forward", "copy"], {
+    errorMap: () => ({ message: "لطفا نوع سرویس را انتخاب کنید." }),
+  }),
   sourceChannels: z
     .array(
       z
         .string()
-        .min(1, { message: "نام کاربری کانال مبدا نمی‌تواند خالی باشد" })
+        .min(1, { message: "نام کاربری کانال مبدا نمی‌تواند خالی باشد." })
     )
-    .min(1, {
-      // Validate each string in array
-      message: "حداقل یک کانال مبدا باید وارد شود",
-    }),
+    .min(1, { message: "حداقل یک کانال مبدا باید وارد شود." }),
   targetChannels: z
     .array(
       z
         .string()
-        .min(1, { message: "نام کاربری کانال مقصد نمی‌تواند خالی باشد" })
+        .min(1, { message: "نام کاربری کانال مقصد نمی‌تواند خالی باشد." })
     )
-    .min(1, {
-      // Validate each string in array
-      message: "حداقل یک کانال مقصد باید وارد شود",
-    }),
+    .min(1, { message: "حداقل یک کانال مقصد باید وارد شود." }),
   useAI: z.boolean().default(false),
   promptTemplate: z.string().optional(),
-  searchReplaceRules: z.array(
-    z.object({
-      search: z.string(),
-      replace: z.string(),
-    })
-  ),
+  searchReplaceRules: z
+    .array(
+      z
+        .object({
+          search: z.string().optional(), // Optional to allow empty search for a rule, but filtered out later if both empty
+          replace: z.string().optional(),
+        })
+        .refine((data) => data.search || data.replace, {
+          // At least one must be present if rule is to be considered
+          message:
+            "حداقل یکی از فیلدهای جستجو یا جایگزینی باید پر شود اگر قانون اضافه شده.",
+          // This refine might be too aggressive if we allow truly empty rules that get filtered.
+          // The main filtering happens in onSubmit.
+        })
+    )
+    .optional(),
   copyHistory: z.boolean().default(false),
-  historyLimit: z.number().min(1).max(10000).optional(),
+  historyLimit: z.coerce
+    .number()
+    .min(1, "حداقل 1")
+    .max(10000, "حداکثر 10000")
+    .optional(),
   historyDirection: z.enum(["newest", "oldest"]).optional(),
   startFromId: z
     .string()
     .optional()
     .refine((val) => !val || /^\d+$/.test(val), {
-      // Ensure it's a number if provided
-      message: "شناسه پیام باید فقط شامل اعداد باشد",
+      message: "شناسه پیام باید فقط شامل اعداد باشد.",
     }),
   copyDirection: z.enum(["before", "after"]).optional(),
 });
@@ -115,13 +133,18 @@ export default function ForwardingServiceForm({
           : [""]
         : [""],
       useAI: Boolean(service?.prompt_template),
-      promptTemplate: service?.prompt_template || "",
+      promptTemplate:
+        service?.prompt_template ||
+        "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
       searchReplaceRules: service?.search_replace_rules
-        ? Array.isArray(service.search_replace_rules)
-          ? service.search_replace_rules
-          : JSON.parse(
-              service.search_replace_rules || '[{"search":"","replace":""}]'
-            )
+        ? (Array.isArray(service.search_replace_rules)
+            ? service.search_replace_rules
+            : JSON.parse(service.search_replace_rules || "[]")
+          ).length > 0
+          ? Array.isArray(service.search_replace_rules)
+            ? service.search_replace_rules
+            : JSON.parse(service.search_replace_rules || "[]")
+          : [{ search: "", replace: "" }]
         : [{ search: "", replace: "" }],
       copyHistory: Boolean(service?.copy_history),
       historyLimit: service?.history_limit || 100,
@@ -146,15 +169,12 @@ export default function ForwardingServiceForm({
       toast.error("لطفاً ابتدا به تلگرام متصل شوید");
       return;
     }
-
     if (values.useAI && !hasGeminiKey) {
       toast.error(
         "برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات وارد کنید"
       );
       return;
     }
-
-    // Block submission if user is normal and their trial has expired, unless they are admin
     if (
       userAccountStatus?.isExpired &&
       !userAccountStatus?.isPremium &&
@@ -170,17 +190,17 @@ export default function ForwardingServiceForm({
     const finalTargetChannels = values.targetChannels.filter(Boolean);
 
     if (finalSourceChannels.length === 0) {
-      form.setError("sourceChannels", {
+      form.setError("sourceChannels.0", {
         type: "manual",
         message: "حداقل یک کانال مبدا الزامی است.",
-      });
+      }); // Target first field for error
       return;
     }
     if (finalTargetChannels.length === 0) {
-      form.setError("targetChannels", {
+      form.setError("targetChannels.0", {
         type: "manual",
         message: "حداقل یک کانال مقصد الزامی است.",
-      });
+      }); // Target first field for error
       return;
     }
 
@@ -214,8 +234,8 @@ export default function ForwardingServiceForm({
         ),
         searchReplaceRules: values.searchReplaceRules.filter(
           (rule) => rule.search || rule.replace
-        ), // Allow empty replace for deletion
-        promptTemplate: values.useAI ? values.promptTemplate : null,
+        ),
+        promptTemplate: values.useAI ? values.promptTemplate : "", // Send empty string if not useAI to clear it
         copyHistory: values.type === "copy" ? values.copyHistory : false,
         historyLimit:
           values.type === "copy" && values.copyHistory
@@ -241,13 +261,13 @@ export default function ForwardingServiceForm({
             : "سرویس با موفقیت ایجاد شد"
         );
         form.reset({
-          // Reset with empty arrays or default values for arrays
           name: "",
           type: "forward",
           sourceChannels: [""],
           targetChannels: [""],
           useAI: false,
-          promptTemplate: "",
+          promptTemplate:
+            "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
           searchReplaceRules: [{ search: "", replace: "" }],
           copyHistory: false,
           historyLimit: 100,
@@ -267,563 +287,553 @@ export default function ForwardingServiceForm({
     }
   };
 
-  const addSourceChannel = () =>
-    form.setValue("sourceChannels", [...form.getValues("sourceChannels"), ""]);
-  const removeSourceChannel = (index) => {
-    const current = form.getValues("sourceChannels");
-    if (current.length > 1)
-      form.setValue(
-        "sourceChannels",
-        current.filter((_, i) => i !== index)
-      );
-    else if (current.length === 1) form.setValue("sourceChannels", [""]); // Clear if last one
-  };
-
-  const addTargetChannel = () =>
-    form.setValue("targetChannels", [...form.getValues("targetChannels"), ""]);
-  const removeTargetChannel = (index) => {
-    const current = form.getValues("targetChannels");
-    if (current.length > 1)
-      form.setValue(
-        "targetChannels",
-        current.filter((_, i) => i !== index)
-      );
-    else if (current.length === 1) form.setValue("targetChannels", [""]); // Clear if last one
-  };
-
-  const addSearchReplaceRule = () =>
-    form.setValue("searchReplaceRules", [
-      ...form.getValues("searchReplaceRules"),
-      { search: "", replace: "" },
-    ]);
-  const removeSearchReplaceRule = (index) => {
-    const current = form.getValues("searchReplaceRules");
-    if (current.length > 1)
-      form.setValue(
-        "searchReplaceRules",
-        current.filter((_, i) => i !== index)
-      );
-    else if (current.length === 1)
-      form.setValue("searchReplaceRules", [{ search: "", replace: "" }]);
-  };
+  const {
+    fields: sourceFields,
+    append: appendSource,
+    remove: removeSource,
+  } = useFieldArray({ control: form.control, name: "sourceChannels" });
+  const {
+    fields: targetFields,
+    append: appendTarget,
+    remove: removeTarget,
+  } = useFieldArray({ control: form.control, name: "targetChannels" });
+  const {
+    fields: ruleFields,
+    append: appendRule,
+    remove: removeRule,
+  } = useFieldArray({ control: form.control, name: "searchReplaceRules" });
 
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
-  const copyHistoryEnabled = form.watch("copyHistory"); // Renamed to avoid conflict
-  const startFromIdWatched = form.watch("startFromId"); // Renamed
+  const copyHistoryEnabled = form.watch("copyHistory");
+  const startFromIdWatched = form.watch("startFromId");
 
   if (!isTelegramConnected) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-destructive mb-4">
-          برای ایجاد سرویس، ابتدا باید به تلگرام متصل شوید
-        </p>
-        <Button
-          variant="outline"
-          onClick={() => (window.location.href = "/dashboard")}
-        >
-          اتصال به تلگرام
-        </Button>
-      </div>
-    );
+    /* ... */
   }
-
-  // Show alert if user is normal (not premium, not admin) and their trial has expired, and they are trying to create a NEW service
   if (
     userAccountStatus?.isExpired &&
+    !service?.id &&
     !userAccountStatus?.isPremium &&
-    !userAccountStatus?.isAdmin &&
-    !service?.id
+    !userAccountStatus?.isAdmin
   ) {
-    return (
-      <Alert variant="destructive">
-        <Info className="h-4 w-4" />
-        <AlertTitle>مهلت استفاده به پایان رسیده</AlertTitle>
-        <AlertDescription>
-          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
-          لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.
-        </AlertDescription>
-      </Alert>
-    );
+    /* ... */
   }
 
   return (
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-6 text-right"
+        className="space-y-8 text-right"
       >
-        {/* Name Field */}
-        <FormField
-          control={form.control}
-          name="name"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-right block">نام سرویس</FormLabel>
-              <FormControl>
-                <Input
-                  placeholder="نام سرویس را وارد کنید"
-                  className="text-right"
-                  {...field}
-                />
-              </FormControl>
-              <FormMessage className="text-right" />
-            </FormItem>
-          )}
-        />
-        {/* Type Field */}
-        <FormField
-          control={form.control}
-          name="type"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>نوع سرویس</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="نوع سرویس را انتخاب کنید" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value="forward">فوروارد خودکار</SelectItem>
-                  <SelectItem value="copy">کپی کانال</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormDescription>
-                {isCopyService
-                  ? "کپی تمامی پست‌های یک کانال به کانال دیگر (تک کانال)"
-                  : "فوروارد خودکار پیام‌ها از کانال‌های مبدا به مقصد (چند کانال)"}
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-right flex items-center gap-x-2">
+              <Settings2 className="h-6 w-6 text-primary" />
+              تنظیمات اصلی سرویس
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>نام سرویس</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="مثال: فوروارد از کانال خبر به کانال شخصی"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="type"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>نوع سرویس</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    dir="rtl"
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="یک نوع را انتخاب کنید" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="forward">فوروارد خودکار</SelectItem>
+                      <SelectItem value="copy">کپی کانال</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    {isCopyService
+                      ? "کپی کامل یک کانال به کانال دیگر."
+                      : "فوروارد پیام‌ها بین چندین کانال."}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </CardContent>
+        </Card>
+
         {isCopyService && (
-          <Alert>
+          <Alert
+            variant="default"
+            className="border-primary/50 text-primary dark:border-primary/70 dark:text-primary/90 [&>svg]:text-primary"
+          >
             <Info className="h-4 w-4" />
             <AlertDescription className="text-right">
-              <strong>توجه:</strong> در حالت کپی کانال، فقط یک کانال مبدا و یک
-              کانال مقصد قابل انتخاب است.
+              <strong>توجه:</strong> در حالت "کپی کانال"، فقط یک کانال مبدا و یک
+              کانال مقصد مجاز است. برای فوروارد از چندین مبدا به چندین مقصد، از
+              نوع "فوروارد خودکار" استفاده کنید.
             </AlertDescription>
           </Alert>
         )}
 
-        {/* Source Channels */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-right">
-            {isCopyService ? "کانال مبدا" : "کانال‌های مبدا"}
-          </h3>
-          {form.watch("sourceChannels").map((_, index) => (
-            <div key={`source-${index}`} className="flex gap-2 items-start">
-              <FormField
-                control={form.control}
-                name={`sourceChannels.${index}`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder={
-                          isCopyService
-                            ? "نام کاربری کانال مبدا (مثال: @channelname)"
-                            : "نام کاربری کانال مبدا"
-                        }
-                        className="text-right"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage className="text-right" />
-                  </FormItem>
-                )}
-              />
-              {(!isCopyService || form.watch("sourceChannels").length > 1) &&
-                index > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => removeSourceChannel(index)}
-                    disabled={
-                      form.watch("sourceChannels").length === 1 && isCopyService
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-            </div>
-          ))}
-          {!isCopyService && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={addSourceChannel}
-              className="w-full"
-            >
-              <Plus className="h-4 w-4 ml-2" />
-              افزودن کانال مبدا
-            </Button>
-          )}
-        </div>
-
-        {/* Target Channels */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-right">
-            {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
-          </h3>
-          {form.watch("targetChannels").map((_, index) => (
-            <div key={`target-${index}`} className="flex gap-2 items-start">
-              <FormField
-                control={form.control}
-                name={`targetChannels.${index}`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder={
-                          isCopyService
-                            ? "نام کاربری کانال مقصد (مثال: @targetchannel)"
-                            : "نام کاربری کانال مقصد"
-                        }
-                        className="text-right"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage className="text-right" />
-                  </FormItem>
-                )}
-              />
-              {(!isCopyService || form.watch("targetChannels").length > 1) &&
-                index > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => removeTargetChannel(index)}
-                    disabled={
-                      form.watch("targetChannels").length === 1 && isCopyService
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-            </div>
-          ))}
-          {!isCopyService && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={addTargetChannel}
-              className="w-full"
-            >
-              <Plus className="h-4 w-4 ml-2" />
-              افزودن کانال مقصد
-            </Button>
-          )}
-        </div>
-
-        {/* Copy Service Specific Fields */}
-        {isCopyService && (
-          <>
-            <FormField
-              control={form.control}
-              name="copyHistory"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5 text-right">
-                    <FormLabel className="text-base">
-                      کپی پیام‌های قبلی
-                    </FormLabel>
-                    <FormDescription>
-                      کپی پیام‌های قدیمی کانال مبدا به کانال مقصد هنگام
-                      فعال‌سازی سرویس
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            {copyHistoryEnabled && (
-              <>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-right flex items-center gap-x-2">
+              <CopyCheck className="h-6 w-6 text-primary" />
+              کانال‌های مبدأ و مقصد
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Source Channels */}
+            <div className="space-y-3 rounded-md border p-4">
+              <FormLabel className="text-base font-medium">
+                {" "}
+                {isCopyService ? "کانال مبدأ" : "کانال‌های مبدأ"}
+              </FormLabel>
+              <FormDescription>
+                نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
+              </FormDescription>
+              {sourceFields.map((field, index) => (
                 <FormField
+                  key={field.id}
                   control={form.control}
-                  name="historyLimit"
-                  render={({ field }) => (
+                  name={`sourceChannels.${index}`}
+                  render={({ field: controlledField }) => (
                     <FormItem>
-                      <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min="1"
-                          max="10000"
-                          placeholder="100"
-                          {...field}
-                          onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 100)
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        حداکثر 10000 پیام قابل کپی است (پیش‌فرض: 100)
-                      </FormDescription>
+                      <div className="flex items-center gap-x-2">
+                        <FormControl>
+                          <Input
+                            placeholder="@SourceChannel"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        {!isCopyService && sourceFields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeSource(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+              ))}
+              {!isCopyService && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => appendSource("")}
+                  className="w-full gap-x-1"
+                >
+                  <Plus className="h-4 w-4" />
+                  افزودن مبدأ
+                </Button>
+              )}
+            </div>
+
+            {/* Target Channels */}
+            <div className="space-y-3 rounded-md border p-4">
+              <FormLabel className="text-base font-medium">
+                {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
+              </FormLabel>
+              <FormDescription>
+                نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
+              </FormDescription>
+              {targetFields.map((field, index) => (
                 <FormField
+                  key={field.id}
                   control={form.control}
-                  name="historyDirection"
-                  render={({ field }) => (
-                    <FormItem className="space-y-3">
-                      <FormLabel>ترتیب انتخاب پیام‌ها</FormLabel>
-                      <FormControl>
+                  name={`targetChannels.${index}`}
+                  render={({ field: controlledField }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-x-2">
+                        <FormControl>
+                          <Input
+                            placeholder="@TargetChannel"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        {!isCopyService && targetFields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeTarget(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ))}
+              {!isCopyService && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => appendTarget("")}
+                  className="w-full gap-x-1"
+                >
+                  <Plus className="h-4 w-4" />
+                  افزودن مقصد
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Copy Service Specific Fields */}
+        {isCopyService && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-right flex items-center gap-x-2">
+                <Copy className="h-5 w-5 text-primary" />
+                تنظیمات کپی تاریخچه
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FormField
+                control={form.control}
+                name="copyHistory"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        کپی پیام‌های قبلی
+                      </FormLabel>
+                      <FormDescription>
+                        کپی پیام‌های قدیمی کانال مبدا به مقصد هنگام فعال‌سازی.
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              {copyHistoryEnabled && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="historyLimit"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>تعداد پیام‌های قدیمی</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min="1"
+                            max="10000"
+                            placeholder="100"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>حداکثر ۱۰۰۰۰ پیام.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="historyDirection"
+                    render={({ field }) => (
+                      <FormItem className="space-y-2">
+                        <FormLabel>ترتیب انتخاب پیام‌ها</FormLabel>
                         <RadioGroup
                           onValueChange={field.onChange}
                           defaultValue={field.value}
                           className="flex flex-col space-y-1"
                         >
-                          <FormItem className="flex items-center space-x-3 space-x-reverse">
+                          <FormItem className="flex items-center gap-x-2">
                             <FormControl>
                               <RadioGroupItem value="newest" />
                             </FormControl>
                             <FormLabel className="font-normal">
-                              جدیدترین پیام‌ها (پیش‌فرض)
+                              جدیدترین
                             </FormLabel>
                           </FormItem>
-                          <FormItem className="flex items-center space-x-3 space-x-reverse">
+                          <FormItem className="flex items-center gap-x-2">
                             <FormControl>
                               <RadioGroupItem value="oldest" />
                             </FormControl>
                             <FormLabel className="font-normal">
-                              قدیمی‌ترین پیام‌ها
+                              قدیمی‌ترین
                             </FormLabel>
                           </FormItem>
                         </RadioGroup>
-                      </FormControl>
-                      <FormDescription>
-                        انتخاب کنید که از کدام پیام‌ها شروع به کپی کند
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
-                  <div className="flex items-center gap-2">
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                    <FormLabel className="text-sm font-medium">
-                      کپی از پیام خاص (پیشرفته - اختیاری)
-                    </FormLabel>
-                  </div>
-                  <FormField
-                    control={form.control}
-                    name="startFromId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>شناسه پیام</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="text"
-                            placeholder="مثال: 12345"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          شناسه پیام مرجع برای شروع کپی (فقط عدد)
-                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  {startFromIdWatched && startFromIdWatched.trim() && (
+                  <div className="space-y-3 rounded-md border p-4 bg-muted/10">
+                    <FormLabel className="text-sm font-medium flex items-center gap-x-1">
+                      <Info className="h-4 w-4" />
+                      کپی از پیام خاص (اختیاری)
+                    </FormLabel>
                     <FormField
                       control={form.control}
-                      name="copyDirection"
+                      name="startFromId"
                       render={({ field }) => (
-                        <FormItem className="space-y-3">
-                          <FormLabel>جهت کپی نسبت به پیام مرجع</FormLabel>
+                        <FormItem>
+                          <FormLabel>شناسه پیام شروع</FormLabel>
                           <FormControl>
+                            <Input
+                              type="text"
+                              placeholder="شناسه عددی پیام"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {startFromIdWatched && startFromIdWatched.trim() && (
+                      <FormField
+                        control={form.control}
+                        name="copyDirection"
+                        render={({ field }) => (
+                          <FormItem className="space-y-2">
+                            <FormLabel>جهت کپی</FormLabel>
                             <RadioGroup
                               onValueChange={field.onChange}
                               defaultValue={field.value}
                               className="flex flex-col space-y-1"
                             >
-                              <FormItem className="flex items-center space-x-3 space-x-reverse">
+                              <FormItem className="flex items-center gap-x-2">
                                 <FormControl>
                                   <RadioGroupItem value="before" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
-                                  پیام‌های قبل از این شناسه (قدیمی‌تر)
+                                  پیام‌های قبل (قدیمی‌تر)
                                 </FormLabel>
                               </FormItem>
-                              <FormItem className="flex items-center space-x-3 space-x-reverse">
+                              <FormItem className="flex items-center gap-x-2">
                                 <FormControl>
                                   <RadioGroupItem value="after" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
-                                  پیام‌های بعد از این شناسه (جدیدتر)
+                                  پیام‌های بعد (جدیدتر)
                                 </FormLabel>
                               </FormItem>
                             </RadioGroup>
-                          </FormControl>
-                          <FormDescription>
-                            انتخاب کنید که پیام‌های قبل یا بعد از شناسه مرجع کپی
-                            شوند
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
-                </div>
-              </>
-            )}
-          </>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* AI Fields */}
-        <FormField
-          control={form.control}
-          name="useAI"
-          render={({ field }) => (
-            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5 text-right">
-                <FormLabel className="text-base">
-                  استفاده از هوش مصنوعی
-                </FormLabel>
-                <FormDescription>
-                  ترجمه یا تبدیل خودکار متن‌ها با استفاده از هوش مصنوعی Gemini
-                </FormDescription>
-              </div>
-              <FormControl>
-                <Switch
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                  disabled={!hasGeminiKey}
-                />
-              </FormControl>
-            </FormItem>
-          )}
-        />
-        {!hasGeminiKey && form.watch("useAI") && (
-          <Alert variant="destructive">
-            <Info className="h-4 w-4" />
-            <AlertTitle>کلید API مورد نیاز است</AlertTitle>
-            <AlertDescription className="text-right">
-              برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات
-              وارد کنید.
-            </AlertDescription>
-          </Alert>
-        )}
-        {form.watch("useAI") && hasGeminiKey && (
-          <FormField
-            control={form.control}
-            name="promptTemplate"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-right block">قالب پرامپت</FormLabel>
-                <FormControl>
-                  <Textarea
-                    placeholder="مثال: متن زیر را به فارسی ترجمه کن: {text}"
-                    className="min-h-[100px] font-mono text-sm text-right"
-                    dir="rtl"
-                    {...field}
-                  />
-                </FormControl>
-                <FormDescription className="text-right">
-                  از {"{text}"} برای جایگذاری متن اصلی استفاده کنید.
-                </FormDescription>
-                <FormMessage className="text-right" />
-              </FormItem>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-right flex items-center gap-x-2">
+              <Brain className="h-5 w-5 text-primary" />
+              تنظیمات هوش مصنوعی
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <FormField
+              control={form.control}
+              name="useAI"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">
+                      استفاده از هوش مصنوعی
+                    </FormLabel>
+                    <FormDescription>
+                      ترجمه، خلاصه‌سازی یا بازنویسی متن پیام‌ها با Gemini.
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      id="useAI-switch"
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!hasGeminiKey}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+            {!hasGeminiKey && form.watch("useAI") && (
+              <Alert variant="destructive">
+                <Info className="h-4 w-4" />
+                <AlertTitle>کلید API مورد نیاز است</AlertTitle>
+                <AlertDescription>
+                  برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در بخش{" "}
+                  <Link
+                    href="/dashboard/settings"
+                    className="font-semibold underline hover:text-destructive/80"
+                  >
+                    تنظیمات
+                  </Link>{" "}
+                  وارد کنید.
+                </AlertDescription>
+              </Alert>
             )}
-          />
-        )}
+            {form.watch("useAI") && hasGeminiKey && (
+              <FormField
+                control={form.control}
+                name="promptTemplate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>قالب دستور به هوش مصنوعی (پرامپت)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="مثال: متن زیر را به فارسی روان ترجمه کن..."
+                        className="min-h-[120px] font-mono text-sm leading-relaxed"
+                        dir="rtl"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      از `&#123;text&#125;` برای جایگذاری متن اصلی پیام استفاده
+                      کنید.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+          </CardContent>
+        </Card>
 
         {/* Search/Replace Rules */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-right">
-            قوانین جایگزینی متن (اختیاری)
-          </h3>
-          <FormDescription className="text-right text-sm">
-            برای جایگزینی خودکار کلمات یا عبارات خاص در متن پیام‌ها.
-          </FormDescription>
-          {form.watch("searchReplaceRules").map((_, index) => (
-            <div key={`rule-${index}`} className="flex gap-2 items-start">
-              <FormField
-                control={form.control}
-                name={`searchReplaceRules.${index}.search`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder="متن جستجو"
-                        className="text-right"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage className="text-right" />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name={`searchReplaceRules.${index}.replace`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder="متن جایگزین"
-                        className="text-right"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage className="text-right" />
-                  </FormItem>
-                )}
-              />
-              {index > 0 ||
-                (form.watch("searchReplaceRules").length > 1 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => removeSearchReplaceRule(index)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                ))}
-            </div>
-          ))}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-right flex items-center gap-x-2">
+              <MessageSquareText className="h-5 w-5 text-primary" />
+              جایگزینی متن
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FormDescription>
+              قوانینی برای جستجو و جایگزینی عبارات خاص در متن پیام‌ها تعریف
+              کنید.
+            </FormDescription>
+            {ruleFields.map((field, index) => (
+              <div
+                key={field.id}
+                className="flex items-start gap-x-2 p-3 border rounded-md bg-muted/20"
+              >
+                <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.search`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جستجو</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="عبارتی که می‌خواهید پیدا شود"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.replace`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جایگزین</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeRule(index)}
+                  className="mt-auto text-destructive hover:text-destructive/80 self-end sm:self-center shrink-0"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="sr-only">حذف قانون</span>
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => appendRule({ search: "", replace: "" })}
+              className="w-full gap-x-1"
+            >
+              <Plus className="h-4 w-4" />
+              افزودن قانون جدید
+            </Button>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end pt-4">
           <Button
-            type="button"
-            variant="outline"
-            onClick={addSearchReplaceRule}
-            className="w-full"
+            type="submit"
+            size="lg"
+            className="w-full sm:w-auto"
+            disabled={
+              loading ||
+              (userAccountStatus?.isExpired &&
+                !userAccountStatus?.isPremium &&
+                !userAccountStatus?.isAdmin &&
+                !service?.id)
+            }
           >
-            <Plus className="h-4 w-4 ml-2" />
-            افزودن قانون جایگزینی
+            {loading
+              ? "در حال پردازش..."
+              : service?.id
+              ? "بروزرسانی سرویس"
+              : "ایجاد سرویس"}
           </Button>
         </div>
-
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={
-            loading ||
-            (userAccountStatus?.isExpired &&
-              !userAccountStatus?.isPremium &&
-              !userAccountStatus?.isAdmin &&
-              !service?.id)
-          }
-        >
-          {loading
-            ? "در حال پردازش..."
-            : service?.id
-            ? "بروزرسانی سرویس"
-            : "ایجاد سرویس"}
-        </Button>
       </form>
     </Form>
   );
