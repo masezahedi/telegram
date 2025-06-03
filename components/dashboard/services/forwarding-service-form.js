@@ -27,7 +27,7 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added AlertTitle
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
@@ -37,12 +37,26 @@ const formSchema = z.object({
     message: "نام سرویس باید حداقل ۲ کاراکتر باشد",
   }),
   type: z.enum(["forward", "copy"]),
-  sourceChannels: z.array(z.string()).min(1, {
-    message: "حداقل یک کانال مبدا باید وارد شود",
-  }),
-  targetChannels: z.array(z.string()).min(1, {
-    message: "حداقل یک کانال مقصد باید وارد شود",
-  }),
+  sourceChannels: z
+    .array(
+      z
+        .string()
+        .min(1, { message: "نام کاربری کانال مبدا نمی‌تواند خالی باشد" })
+    )
+    .min(1, {
+      // Validate each string in array
+      message: "حداقل یک کانال مبدا باید وارد شود",
+    }),
+  targetChannels: z
+    .array(
+      z
+        .string()
+        .min(1, { message: "نام کاربری کانال مقصد نمی‌تواند خالی باشد" })
+    )
+    .min(1, {
+      // Validate each string in array
+      message: "حداقل یک کانال مقصد باید وارد شود",
+    }),
   useAI: z.boolean().default(false),
   promptTemplate: z.string().optional(),
   searchReplaceRules: z.array(
@@ -54,7 +68,13 @@ const formSchema = z.object({
   copyHistory: z.boolean().default(false),
   historyLimit: z.number().min(1).max(10000).optional(),
   historyDirection: z.enum(["newest", "oldest"]).optional(),
-  startFromId: z.string().optional(),
+  startFromId: z
+    .string()
+    .optional()
+    .refine((val) => !val || /^\d+$/.test(val), {
+      // Ensure it's a number if provided
+      message: "شناسه پیام باید فقط شامل اعداد باشد",
+    }),
   copyDirection: z.enum(["before", "after"]).optional(),
 });
 
@@ -73,14 +93,26 @@ export default function ForwardingServiceForm({
       name: service?.name || "",
       type: service?.type || "forward",
       sourceChannels: service?.source_channels
-        ? Array.isArray(service.source_channels)
-          ? service.source_channels
-          : JSON.parse(service.source_channels || '[""]')
+        ? (Array.isArray(service.source_channels)
+            ? service.source_channels
+            : JSON.parse(service.source_channels || '[""]')
+          ).filter(Boolean).length > 0
+          ? (Array.isArray(service.source_channels)
+              ? service.source_channels
+              : JSON.parse(service.source_channels || '[""]')
+            ).filter(Boolean)
+          : [""]
         : [""],
       targetChannels: service?.target_channels
-        ? Array.isArray(service.target_channels)
-          ? service.target_channels
-          : JSON.parse(service.target_channels || '[""]')
+        ? (Array.isArray(service.target_channels)
+            ? service.target_channels
+            : JSON.parse(service.target_channels || '[""]')
+          ).filter(Boolean).length > 0
+          ? (Array.isArray(service.target_channels)
+              ? service.target_channels
+              : JSON.parse(service.target_channels || '[""]')
+            ).filter(Boolean)
+          : [""]
         : [""],
       useAI: Boolean(service?.prompt_template),
       promptTemplate: service?.prompt_template || "",
@@ -103,11 +135,9 @@ export default function ForwardingServiceForm({
     const checkRequirements = async () => {
       const user = AuthService.getStoredUser();
       setIsTelegramConnected(Boolean(user?.isTelegramConnected));
-
       const settings = await SettingsService.getSettings();
       setHasGeminiKey(Boolean(settings?.gemini_api_key));
     };
-
     checkRequirements();
   }, []);
 
@@ -124,28 +154,47 @@ export default function ForwardingServiceForm({
       return;
     }
 
-    if (userAccountStatus?.isExpired && !userAccountStatus?.isPremium) {
+    // Block submission if user is normal and their trial has expired, unless they are admin
+    if (
+      userAccountStatus?.isExpired &&
+      !userAccountStatus?.isPremium &&
+      !userAccountStatus?.isAdmin
+    ) {
       toast.error(
         "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد یا ویرایش کنید."
       );
       return;
     }
 
-    // اعتبارسنجی ویژه برای کپی سرویس
+    const finalSourceChannels = values.sourceChannels.filter(Boolean);
+    const finalTargetChannels = values.targetChannels.filter(Boolean);
+
+    if (finalSourceChannels.length === 0) {
+      form.setError("sourceChannels", {
+        type: "manual",
+        message: "حداقل یک کانال مبدا الزامی است.",
+      });
+      return;
+    }
+    if (finalTargetChannels.length === 0) {
+      form.setError("targetChannels", {
+        type: "manual",
+        message: "حداقل یک کانال مقصد الزامی است.",
+      });
+      return;
+    }
+
     if (values.type === "copy") {
-      if (values.sourceChannels.filter(Boolean).length > 1) {
+      if (finalSourceChannels.length > 1) {
         toast.error("در حالت کپی کانال، فقط یک کانال مبدا مجاز است");
         return;
       }
-
-      if (values.targetChannels.filter(Boolean).length > 1) {
+      if (finalTargetChannels.length > 1) {
         toast.error("در حالت کپی کانال، فقط یک کانال مقصد مجاز است");
         return;
       }
-
-      // اعتبارسنجی شناسه پیام
       if (values.startFromId && values.startFromId.trim()) {
-        const messageId = parseInt(values.startFromId.trim());
+        const messageId = parseInt(values.startFromId.trim(), 10);
         if (isNaN(messageId) || messageId <= 0) {
           toast.error("شناسه پیام باید یک عدد مثبت باشد");
           return;
@@ -157,24 +206,15 @@ export default function ForwardingServiceForm({
     try {
       const cleanedValues = {
         ...values,
-        type: values.type,
-        sourceChannels: values.sourceChannels
-          .filter(Boolean)
-          .map((channel) =>
-            channel.trim().startsWith("@")
-              ? channel.trim()
-              : `@${channel.trim()}`
-          ),
-        targetChannels: values.targetChannels
-          .filter(Boolean)
-          .map((channel) =>
-            channel.trim().startsWith("@")
-              ? channel.trim()
-              : `@${channel.trim()}`
-          ),
-        searchReplaceRules: values.searchReplaceRules.filter(
-          (rule) => rule.search && rule.replace
+        sourceChannels: finalSourceChannels.map((channel) =>
+          channel.trim().startsWith("@") ? channel.trim() : `@${channel.trim()}`
         ),
+        targetChannels: finalTargetChannels.map((channel) =>
+          channel.trim().startsWith("@") ? channel.trim() : `@${channel.trim()}`
+        ),
+        searchReplaceRules: values.searchReplaceRules.filter(
+          (rule) => rule.search || rule.replace
+        ), // Allow empty replace for deletion
         promptTemplate: values.useAI ? values.promptTemplate : null,
         copyHistory: values.type === "copy" ? values.copyHistory : false,
         historyLimit:
@@ -200,7 +240,21 @@ export default function ForwardingServiceForm({
             ? "سرویس با موفقیت بروزرسانی شد"
             : "سرویس با موفقیت ایجاد شد"
         );
-        form.reset();
+        form.reset({
+          // Reset with empty arrays or default values for arrays
+          name: "",
+          type: "forward",
+          sourceChannels: [""],
+          targetChannels: [""],
+          useAI: false,
+          promptTemplate: "",
+          searchReplaceRules: [{ search: "", replace: "" }],
+          copyHistory: false,
+          historyLimit: 100,
+          historyDirection: "newest",
+          startFromId: "",
+          copyDirection: "before",
+        });
         onSuccess?.();
       } else {
         toast.error(result.error || "خطا در عملیات سرویس");
@@ -213,75 +267,50 @@ export default function ForwardingServiceForm({
     }
   };
 
-  const addSourceChannel = () => {
-    const currentChannels = form.getValues("sourceChannels");
-    form.setValue("sourceChannels", [...currentChannels, ""]);
-  };
-
+  const addSourceChannel = () =>
+    form.setValue("sourceChannels", [...form.getValues("sourceChannels"), ""]);
   const removeSourceChannel = (index) => {
-    const currentChannels = form.getValues("sourceChannels");
-    if (currentChannels.length > 1) {
+    const current = form.getValues("sourceChannels");
+    if (current.length > 1)
       form.setValue(
         "sourceChannels",
-        currentChannels.filter((_, i) => i !== index)
+        current.filter((_, i) => i !== index)
       );
-    }
+    else if (current.length === 1) form.setValue("sourceChannels", [""]); // Clear if last one
   };
 
-  if (
-    userAccountStatus?.isExpired &&
-    !service &&
-    !userAccountStatus?.isPremium
-  ) {
-    // If creating new and normal user trial expired
-    return (
-      <Alert variant="destructive">
-        <Info className="h-4 w-4" />
-        <AlertDescription>
-          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
-          لطفاً اشتراک خود را ارتقا دهید.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  const addTargetChannel = () => {
-    const currentChannels = form.getValues("targetChannels");
-    form.setValue("targetChannels", [...currentChannels, ""]);
-  };
-
+  const addTargetChannel = () =>
+    form.setValue("targetChannels", [...form.getValues("targetChannels"), ""]);
   const removeTargetChannel = (index) => {
-    const currentChannels = form.getValues("targetChannels");
-    if (currentChannels.length > 1) {
+    const current = form.getValues("targetChannels");
+    if (current.length > 1)
       form.setValue(
         "targetChannels",
-        currentChannels.filter((_, i) => i !== index)
+        current.filter((_, i) => i !== index)
       );
-    }
+    else if (current.length === 1) form.setValue("targetChannels", [""]); // Clear if last one
   };
 
-  const addSearchReplaceRule = () => {
-    const currentRules = form.getValues("searchReplaceRules");
+  const addSearchReplaceRule = () =>
     form.setValue("searchReplaceRules", [
-      ...currentRules,
+      ...form.getValues("searchReplaceRules"),
       { search: "", replace: "" },
     ]);
-  };
-
   const removeSearchReplaceRule = (index) => {
-    const currentRules = form.getValues("searchReplaceRules");
-    if (currentRules.length > 1) {
+    const current = form.getValues("searchReplaceRules");
+    if (current.length > 1)
       form.setValue(
         "searchReplaceRules",
-        currentRules.filter((_, i) => i !== index)
+        current.filter((_, i) => i !== index)
       );
-    }
+    else if (current.length === 1)
+      form.setValue("searchReplaceRules", [{ search: "", replace: "" }]);
   };
 
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
-  const copyHistory = form.watch("copyHistory");
-  const startFromId = form.watch("startFromId");
+  const copyHistoryEnabled = form.watch("copyHistory"); // Renamed to avoid conflict
+  const startFromIdWatched = form.watch("startFromId"); // Renamed
 
   if (!isTelegramConnected) {
     return (
@@ -299,12 +328,32 @@ export default function ForwardingServiceForm({
     );
   }
 
+  // Show alert if user is normal (not premium, not admin) and their trial has expired, and they are trying to create a NEW service
+  if (
+    userAccountStatus?.isExpired &&
+    !userAccountStatus?.isPremium &&
+    !userAccountStatus?.isAdmin &&
+    !service?.id
+  ) {
+    return (
+      <Alert variant="destructive">
+        <Info className="h-4 w-4" />
+        <AlertTitle>مهلت استفاده به پایان رسیده</AlertTitle>
+        <AlertDescription>
+          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
+          لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   return (
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
         className="space-y-6 text-right"
       >
+        {/* Name Field */}
         <FormField
           control={form.control}
           name="name"
@@ -322,7 +371,7 @@ export default function ForwardingServiceForm({
             </FormItem>
           )}
         />
-
+        {/* Type Field */}
         <FormField
           control={form.control}
           name="type"
@@ -349,33 +398,23 @@ export default function ForwardingServiceForm({
             </FormItem>
           )}
         />
-
         {isCopyService && (
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription className="text-right">
               <strong>توجه:</strong> در حالت کپی کانال، فقط یک کانال مبدا و یک
-              کانال مقصد قابل انتخاب است. این حالت برای کپی کامل محتوای یک کانال
-              به کانال دیگر طراحی شده است.
+              کانال مقصد قابل انتخاب است.
             </AlertDescription>
           </Alert>
         )}
 
-        <div className="space-y-4">
+        {/* Source Channels */}
+        <div className="space-y-2">
           <h3 className="text-sm font-medium text-right">
             {isCopyService ? "کانال مبدا" : "کانال‌های مبدا"}
           </h3>
           {form.watch("sourceChannels").map((_, index) => (
-            <div key={index} className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => removeSourceChannel(index)}
-                disabled={form.watch("sourceChannels").length === 1}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+            <div key={`source-${index}`} className="flex gap-2 items-start">
               <FormField
                 control={form.control}
                 name={`sourceChannels.${index}`}
@@ -396,6 +435,20 @@ export default function ForwardingServiceForm({
                   </FormItem>
                 )}
               />
+              {(!isCopyService || form.watch("sourceChannels").length > 1) &&
+                index > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => removeSourceChannel(index)}
+                    disabled={
+                      form.watch("sourceChannels").length === 1 && isCopyService
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
             </div>
           ))}
           {!isCopyService && (
@@ -411,21 +464,13 @@ export default function ForwardingServiceForm({
           )}
         </div>
 
-        <div className="space-y-4">
+        {/* Target Channels */}
+        <div className="space-y-2">
           <h3 className="text-sm font-medium text-right">
             {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
           </h3>
           {form.watch("targetChannels").map((_, index) => (
-            <div key={index} className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => removeTargetChannel(index)}
-                disabled={form.watch("targetChannels").length === 1}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+            <div key={`target-${index}`} className="flex gap-2 items-start">
               <FormField
                 control={form.control}
                 name={`targetChannels.${index}`}
@@ -446,6 +491,20 @@ export default function ForwardingServiceForm({
                   </FormItem>
                 )}
               />
+              {(!isCopyService || form.watch("targetChannels").length > 1) &&
+                index > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => removeTargetChannel(index)}
+                    disabled={
+                      form.watch("targetChannels").length === 1 && isCopyService
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
             </div>
           ))}
           {!isCopyService && (
@@ -461,6 +520,7 @@ export default function ForwardingServiceForm({
           )}
         </div>
 
+        {/* Copy Service Specific Fields */}
         {isCopyService && (
           <>
             <FormField
@@ -486,8 +546,7 @@ export default function ForwardingServiceForm({
                 </FormItem>
               )}
             />
-
-            {copyHistory && (
+            {copyHistoryEnabled && (
               <>
                 <FormField
                   control={form.control}
@@ -514,7 +573,6 @@ export default function ForwardingServiceForm({
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control}
                   name="historyDirection"
@@ -552,7 +610,6 @@ export default function ForwardingServiceForm({
                     </FormItem>
                   )}
                 />
-
                 <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
                   <div className="flex items-center gap-2">
                     <Info className="h-4 w-4 text-muted-foreground" />
@@ -560,7 +617,6 @@ export default function ForwardingServiceForm({
                       کپی از پیام خاص (پیشرفته - اختیاری)
                     </FormLabel>
                   </div>
-
                   <FormField
                     control={form.control}
                     name="startFromId"
@@ -569,20 +625,19 @@ export default function ForwardingServiceForm({
                         <FormLabel>شناسه پیام</FormLabel>
                         <FormControl>
                           <Input
-                            type="number"
+                            type="text"
                             placeholder="مثال: 12345"
                             {...field}
                           />
                         </FormControl>
                         <FormDescription>
-                          شناسه پیام مرجع برای شروع کپی (عدد مثبت)
+                          شناسه پیام مرجع برای شروع کپی (فقط عدد)
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-
-                  {startFromId && startFromId.trim() && (
+                  {startFromIdWatched && startFromIdWatched.trim() && (
                     <FormField
                       control={form.control}
                       name="copyDirection"
@@ -628,6 +683,7 @@ export default function ForwardingServiceForm({
           </>
         )}
 
+        {/* AI Fields */}
         <FormField
           control={form.control}
           name="useAI"
@@ -651,18 +707,17 @@ export default function ForwardingServiceForm({
             </FormItem>
           )}
         />
-
-        {!hasGeminiKey && (
-          <Alert>
+        {!hasGeminiKey && form.watch("useAI") && (
+          <Alert variant="destructive">
             <Info className="h-4 w-4" />
+            <AlertTitle>کلید API مورد نیاز است</AlertTitle>
             <AlertDescription className="text-right">
               برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات
               وارد کنید.
             </AlertDescription>
           </Alert>
         )}
-
-        {form.watch("useAI") && (
+        {form.watch("useAI") && hasGeminiKey && (
           <FormField
             control={form.control}
             name="promptTemplate"
@@ -672,14 +727,13 @@ export default function ForwardingServiceForm({
                 <FormControl>
                   <Textarea
                     placeholder="مثال: متن زیر را به فارسی ترجمه کن: {text}"
-                    className="min-h-[150px] font-mono text-sm text-right"
+                    className="min-h-[100px] font-mono text-sm text-right"
                     dir="rtl"
                     {...field}
                   />
                 </FormControl>
                 <FormDescription className="text-right">
-                  از {"{text}"} برای جایگذاری متن اصلی استفاده کنید. مثال: "متن
-                  زیر را خلاصه کن: {"{text}"}"
+                  از {"{text}"} برای جایگذاری متن اصلی استفاده کنید.
                 </FormDescription>
                 <FormMessage className="text-right" />
               </FormItem>
@@ -687,40 +741,16 @@ export default function ForwardingServiceForm({
           />
         )}
 
-        <div className="space-y-4">
+        {/* Search/Replace Rules */}
+        <div className="space-y-2">
           <h3 className="text-sm font-medium text-right">
             قوانین جایگزینی متن (اختیاری)
           </h3>
           <FormDescription className="text-right text-sm">
-            برای جایگزینی خودکار کلمات یا عبارات خاص در متن پیام‌ها
+            برای جایگزینی خودکار کلمات یا عبارات خاص در متن پیام‌ها.
           </FormDescription>
           {form.watch("searchReplaceRules").map((_, index) => (
-            <div key={index} className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => removeSearchReplaceRule(index)}
-                disabled={form.watch("searchReplaceRules").length === 1}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-              <FormField
-                control={form.control}
-                name={`searchReplaceRules.${index}.replace`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder="متن جایگزین"
-                        className="text-right"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage className="text-right" />
-                  </FormItem>
-                )}
-              />
+            <div key={`rule-${index}`} className="flex gap-2 items-start">
               <FormField
                 control={form.control}
                 name={`searchReplaceRules.${index}.search`}
@@ -737,6 +767,33 @@ export default function ForwardingServiceForm({
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name={`searchReplaceRules.${index}.replace`}
+                render={({ field }) => (
+                  <FormItem className="flex-1">
+                    <FormControl>
+                      <Input
+                        placeholder="متن جایگزین"
+                        className="text-right"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-right" />
+                  </FormItem>
+                )}
+              />
+              {index > 0 ||
+                (form.watch("searchReplaceRules").length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => removeSearchReplaceRule(index)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ))}
             </div>
           ))}
           <Button
@@ -750,7 +807,17 @@ export default function ForwardingServiceForm({
           </Button>
         </div>
 
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={
+            loading ||
+            (userAccountStatus?.isExpired &&
+              !userAccountStatus?.isPremium &&
+              !userAccountStatus?.isAdmin &&
+              !service?.id)
+          }
+        >
           {loading
             ? "در حال پردازش..."
             : service?.id

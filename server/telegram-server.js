@@ -1,23 +1,23 @@
+// File: server/telegram-server.js
+
 const express = require("express");
 const cors = require("cors");
 const { Api } = require("telegram");
 const { verifyToken } = require("./utils/auth");
 const { createClient, activeClients } = require("./services/telegram/client");
 const {
-  stopService,
-  startUserServices,
-  stopUserServices,
   initializeAllServices,
-  activeServices: currentlyActiveServicesMap,
+  stopService, // Make sure stopService is correctly imported and used
+  // activeServices, // This was used in health check, ensure it's still valid or adjust health check
 } = require("./services/telegram/service-manager");
-
 const {
   messageMaps,
   saveMessageMap,
   cleanExpiredMessages,
 } = require("./services/telegram/message-maps");
 const { API_ID, API_HASH } = require("./config");
-const { openDb } = require("./utils/db");
+const { openDb } = require("./utils/db"); // Ensure this is correctly pathed if db.js is in server/utils
+
 const app = express();
 
 // Environment configuration
@@ -51,7 +51,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Auth Routes
+// Auth Routes (Copied from telegram-server.js, assuming they are correct)
 app.post("/sendCode", async (req, res) => {
   try {
     const { phoneNumber } = req.body;
@@ -59,7 +59,7 @@ app.post("/sendCode", async (req, res) => {
       return res.status(400).json({ error: "Phone number is required" });
     }
 
-    const client = await createClient();
+    const client = await createClient(); // from ./services/telegram/client
     const result = await client.invoke(
       new Api.auth.SendCode({
         phoneNumber,
@@ -70,6 +70,7 @@ app.post("/sendCode", async (req, res) => {
     );
 
     activeClients.set(phoneNumber, {
+      // from ./services/telegram/client
       client,
       phoneCodeHash: result.phoneCodeHash,
     });
@@ -110,7 +111,7 @@ app.post("/signIn", async (req, res) => {
     );
 
     const stringSession = client.session.save();
-    activeClients.delete(phoneNumber);
+    activeClients.delete(phoneNumber); // Ensure this is intended after successful sign-in
 
     res.json({ success: true, stringSession });
   } catch (err) {
@@ -163,17 +164,22 @@ app.post("/checkPassword", async (req, res) => {
   }
 });
 
-// Service Routes
+// Service Routes (Using service-manager functions)
+// These routes in telegram-server.js might be redundant if you have API routes in Next.js
+// If these are intended to be used by the Next.js backend, ensure verifyToken uses the same JWT_SECRET
+// For now, I will assume they are part of the Express server and might be called internally or by another client.
 app.post("/services/start", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const decoded = await verifyToken(token); // from ./utils/auth
 
     if (!decoded) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-
-    await startUserServices(decoded.userId);
+    // startUserServices needs to be the one from service-manager
+    await require("./services/telegram/service-manager").startUserServices(
+      decoded.userId
+    );
     res.json({ success: true });
   } catch (err) {
     console.error("Error starting services:", err);
@@ -184,13 +190,15 @@ app.post("/services/start", async (req, res) => {
 app.post("/services/stop", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const decoded = await verifyToken(token); // from ./utils/auth
 
     if (!decoded) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-
-    await stopUserServices(decoded.userId);
+    // stopUserServices needs to be the one from service-manager
+    await require("./services/telegram/service-manager").stopUserServices(
+      decoded.userId
+    );
     res.json({ success: true });
   } catch (err) {
     console.error("Error stopping services:", err);
@@ -200,57 +208,19 @@ app.post("/services/stop", async (req, res) => {
 
 // Health check endpoint
 app.get("/health", (req, res) => {
+  const {
+    activeServices: activeUserServicesMap,
+  } = require("./services/telegram/service-manager");
+  const activeServiceInstanceCount = Array.from(
+    activeUserServicesMap.values()
+  ).reduce((total, userServices) => total + userServices.size, 0);
   res.json({
     status: "OK",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
-    activeClients: activeClients.size,
-    activeServices: Array.from(activeServices.values()).reduce(
-      (total, userServices) => total + userServices.size,
-      0
-    ),
+    activeTelegramClients: activeClients.size, // from client.js
+    activeServiceInstances: activeServiceInstanceCount, // from service-manager.js
   });
-});
-
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("\n💾 Saving data and closing connections...");
-
-  for (const [serviceId, messageMap] of messageMaps.entries()) {
-    cleanExpiredMessages(serviceId);
-    saveMessageMap(serviceId, messageMap);
-  }
-
-  for (const client of activeClients.values()) {
-    try {
-      await client.disconnect();
-    } catch (err) {
-      console.error("Error disconnecting client:", err);
-    }
-  }
-
-  console.log("✅ Data saved. Exiting...");
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  console.log("\n💾 Saving data and closing connections...");
-
-  for (const [serviceId, messageMap] of messageMaps.entries()) {
-    cleanExpiredMessages(serviceId);
-    saveMessageMap(serviceId, messageMap);
-  }
-
-  for (const client of activeClients.values()) {
-    try {
-      await client.disconnect();
-    } catch (err) {
-      console.error("Error disconnecting client:", err);
-    }
-  }
-
-  console.log("✅ Data saved. Exiting...");
-  process.exit(0);
 });
 
 async function checkAndExpireServices() {
@@ -264,39 +234,46 @@ async function checkAndExpireServices() {
     const expiredPremiumUsers = await db.all(
       `
       SELECT id FROM users
-      WHERE is_premium = 1 AND premium_expiry_date IS NOT NULL AND premium_expiry_date < ?
+      WHERE is_admin = 0 AND is_premium = 1 AND premium_expiry_date IS NOT NULL AND premium_expiry_date < ?
     `,
       [nowISO]
     );
 
     for (const user of expiredPremiumUsers) {
       console.log(
-        `⏳ Premium expired for user ${user.id}. Deactivating services and reverting to normal user.`
+        `⏳ Premium expired for user ${user.id}. Deactivating services and reverting to normal user status.`
       );
       await db.run(
         "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [user.id]
       );
-      // Deactivate all their services
+
       const userServices = await db.all(
         "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
         [user.id]
       );
       for (const service of userServices) {
+        console.log(
+          `🔴 Deactivating service ${service.id} for user ${user.id} due to premium expiry.`
+        );
         await db.run(
           "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [service.id]
         );
-        await stopService(user.id, service.id); // Stop the actual service
-        console.log(
-          `🔴 Service ${service.id} for user ${user.id} deactivated due to premium expiry.`
-        );
+        try {
+          await stopService(user.id, service.id); // from service-manager
+        } catch (err) {
+          console.error(
+            `Error stopping expired premium service ${service.id}:`,
+            err
+          );
+        }
       }
-      // Notify user about premium expiry (optional)
+      // TODO: Notify user about premium expiry (e.g., via Telegram if session is valid or email)
     }
 
     // 2. Handle normal users whose 15-day trial (based on premium_expiry_date set from trial_activated_at) expired
-    // These are users who are NOT premium, and their premium_expiry_date (acting as account_expiry_date) is past
+    // These are users who are NOT admin, NOT premium, and their premium_expiry_date (acting as account_expiry_date from trial) is past
     const expiredNormalUsers = await db.all(
       `
       SELECT id FROM users
@@ -312,22 +289,28 @@ async function checkAndExpireServices() {
       console.log(
         `⏳ Trial period expired for normal user ${user.id}. Deactivating services.`
       );
-      // Deactivate all their services. They are already not premium.
       const userServices = await db.all(
         "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
         [user.id]
       );
       for (const service of userServices) {
+        console.log(
+          `🔴 Deactivating service ${service.id} for user ${user.id} due to trial expiry.`
+        );
         await db.run(
           "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [service.id]
         );
-        await stopService(user.id, service.id); // Stop the actual service
-        console.log(
-          `🔴 Service ${service.id} for user ${user.id} deactivated due to trial expiry.`
-        );
+        try {
+          await stopService(user.id, service.id); // from service-manager
+        } catch (err) {
+          console.error(
+            `Error stopping expired trial service ${service.id}:`,
+            err
+          );
+        }
       }
-      // Notify user about trial expiry (optional)
+      // TODO: Notify user about trial expiry
     }
     console.log("✅ Finished checking for expired accounts and services.");
   } catch (error) {
@@ -335,11 +318,85 @@ async function checkAndExpireServices() {
   }
 }
 
-// Initialize all services on server start
-initializeAllServices();
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\n💾 Saving data and closing connections...");
+  for (const [serviceId, messageMap] of messageMaps.entries()) {
+    cleanExpiredMessages(serviceId);
+    saveMessageMap(serviceId, messageMap);
+  }
+  // Disconnect active Telegram clients used for login/2FA steps
+  for (const clientData of activeClients.values()) {
+    if (
+      clientData &&
+      clientData.client &&
+      typeof clientData.client.disconnect === "function"
+    ) {
+      try {
+        await clientData.client.disconnect();
+      } catch (err) {
+        console.error("Error disconnecting a temp client:", err);
+      }
+    }
+  }
+  // Disconnect persistent clients from service-manager
+  const {
+    activeClients: persistentClients,
+  } = require("./services/telegram/client");
+  for (const client of persistentClients.values()) {
+    if (client && typeof client.disconnect === "function") {
+      try {
+        await client.disconnect();
+      } catch (err) {
+        console.error("Error disconnecting persistent client:", err);
+      }
+    }
+  }
+  console.log("✅ Data saved. Exiting...");
+  process.exit(0);
+});
 
-// راه‌اندازی بررسی انقضای سرویس‌ها به صورت دوره‌ای (مثلاً هر ساعت)
-const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 ساعت
+process.on("SIGTERM", async () => {
+  // Same as SIGINT
+  console.log("\n💾 Saving data and closing connections...");
+  for (const [serviceId, messageMap] of messageMaps.entries()) {
+    cleanExpiredMessages(serviceId);
+    saveMessageMap(serviceId, messageMap);
+  }
+  for (const clientData of activeClients.values()) {
+    if (
+      clientData &&
+      clientData.client &&
+      typeof clientData.client.disconnect === "function"
+    ) {
+      try {
+        await clientData.client.disconnect();
+      } catch (err) {
+        console.error("Error disconnecting a temp client:", err);
+      }
+    }
+  }
+  const {
+    activeClients: persistentClients,
+  } = require("./services/telegram/client");
+  for (const client of persistentClients.values()) {
+    if (client && typeof client.disconnect === "function") {
+      try {
+        await client.disconnect();
+      } catch (err) {
+        console.error("Error disconnecting persistent client:", err);
+      }
+    }
+  }
+  console.log("✅ Data saved. Exiting...");
+  process.exit(0);
+});
+
+// Initialize all services on server start (from service-manager)
+require("./services/telegram/service-manager").initializeAllServices();
+
+const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
+// const EXPIRY_CHECK_INTERVAL = 30 * 1000; // For testing: 30 seconds
 setInterval(checkAndExpireServices, EXPIRY_CHECK_INTERVAL);
 checkAndExpireServices(); // Run once on server start
 

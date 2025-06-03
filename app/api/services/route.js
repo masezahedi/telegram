@@ -8,7 +8,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// GET function remains the same as in Phase 3 (New)
 export async function GET(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -23,7 +22,6 @@ export async function GET(request) {
 
     const db = await openDb();
     const servicesFromDb = await db.all(
-      // Renamed to avoid conflict
       "SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC",
       [decoded.userId]
     );
@@ -31,7 +29,6 @@ export async function GET(request) {
     return NextResponse.json({
       success: true,
       services: servicesFromDb.map((service) => ({
-        // Use servicesFromDb
         ...service,
         source_channels: JSON.parse(service.source_channels || "[]"),
         target_channels: JSON.parse(service.target_channels || "[]"),
@@ -44,7 +41,7 @@ export async function GET(request) {
         history_direction: service.history_direction ?? "newest",
         start_from_id: service.start_from_id,
         copy_direction: service.copy_direction ?? "before",
-        // service_activated_at will be included here automatically if present in DB
+        service_activated_at: service.service_activated_at, // اطمینان از ارسال این فیلد
       })),
     });
   } catch (error) {
@@ -56,7 +53,6 @@ export async function GET(request) {
   }
 }
 
-// POST function remains the same as in Phase 3 (New)
 export async function POST(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -93,7 +89,7 @@ export async function POST(request) {
 
     const db = await openDb();
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, service_creation_count FROM users WHERE id = ?",
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
       [decoded.userId]
     );
 
@@ -105,16 +101,54 @@ export async function POST(request) {
     }
 
     const now = new Date();
+    let effectiveAccountExpiryDate = null;
 
+    if (
+      user.is_premium &&
+      user.premium_expiry_date &&
+      new Date(user.premium_expiry_date) > now
+    ) {
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+    } else if (
+      !user.is_admin &&
+      !user.is_premium &&
+      user.trial_activated_at &&
+      user.premium_expiry_date
+    ) {
+      // For normal users, premium_expiry_date is their trial end date
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+    }
+
+    // --- Start of Limit Checks for Creating Service ---
     if (!user.is_admin) {
+      // Check 1: Overall account/trial expiry for creating new services
+      // If user is not premium, and their trial has started AND expired
+      if (
+        !user.is_premium &&
+        user.trial_activated_at &&
+        effectiveAccountExpiryDate &&
+        now >= effectiveAccountExpiryDate
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدیدی ایجاد کنید. لطفاً اشتراک خود را ارتقا دهید.",
+          },
+          { status: 403 }
+        );
+      }
+
+      // Tier-based limits
       if (
         user.is_premium &&
-        user.premium_expiry_date &&
-        new Date(user.premium_expiry_date) > now
+        effectiveAccountExpiryDate &&
+        now < effectiveAccountExpiryDate
       ) {
-        // Premium User Logic: No specific creation limits other than active count (handled in PUT)
+        // Premium User: No specific limits on source/destination count at creation
+        // Active service count limit is checked during activation (PUT)
       } else {
-        // Normal User Logic
+        // Normal User (or expired premium)
         if (
           sourceChannels.filter(Boolean).length > 1 ||
           targetChannels.filter(Boolean).length > 1
@@ -128,32 +162,22 @@ export async function POST(request) {
             { status: 403 }
           );
         }
+        // service_creation_count logic was removed previously.
       }
     }
+    // --- End of Limit Checks for Creating Service ---
 
     const serviceId = Date.now().toString();
 
     await db.run(
       `
-  INSERT INTO forwarding_services (
-    id,
-    user_id,
-    name,
-    type,
-    source_channels,
-    target_channels,
-    search_replace_rules,
-    prompt_template,
-    copy_history,
-    history_limit,
-    history_direction,
-    start_from_id,
-    copy_direction,
-    created_at,
-    updated_at,
-    service_activated_at 
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL) 
-`, // service_activated_at is NULL on creation
+      INSERT INTO forwarding_services (
+        id, user_id, name, type, source_channels, target_channels, 
+        search_replace_rules, prompt_template, copy_history, history_limit, 
+        history_direction, start_from_id, copy_direction, 
+        created_at, updated_at, service_activated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+      `,
       [
         serviceId,
         decoded.userId,
@@ -193,7 +217,7 @@ export async function PUT(request) {
       );
     }
 
-    const { id: serviceIdToUpdate, isActive } = await request.json(); // serviceIdToUpdate, new active state
+    const { id: serviceIdToUpdate, isActive } = await request.json();
     const db = await openDb();
     const user = await db.get(
       "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
@@ -221,59 +245,67 @@ export async function PUT(request) {
 
     const now = new Date();
     let effectiveAccountExpiryDate = null;
+    let userIsEffectivelyPremium = false;
 
-    if (
+    if (user.is_admin) {
+      userIsEffectivelyPremium = true; // Admins have no restrictions
+    } else if (
       user.is_premium &&
       user.premium_expiry_date &&
       new Date(user.premium_expiry_date) > now
     ) {
       effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
-    } else if (!user.is_admin && !user.is_premium && user.trial_activated_at) {
-      const trialEnd = new Date(user.trial_activated_at);
-      trialEnd.setDate(trialEnd.getDate() + 15);
-      effectiveAccountExpiryDate = trialEnd;
+      userIsEffectivelyPremium = true;
+    } else if (
+      !user.is_premium &&
+      user.trial_activated_at &&
+      user.premium_expiry_date
+    ) {
+      // Normal user whose trial has started, premium_expiry_date is their trial end.
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+      userIsEffectivelyPremium = false;
+    } else if (!user.is_premium && !user.trial_activated_at) {
+      // Normal user, trial not yet started. They can activate one service to start trial.
+      userIsEffectivelyPremium = false;
     }
 
-    // --- Start of Limit Checks for Activation ---
     if (isActive) {
       // Only apply these checks if trying to ACTIVATE a service
       if (!user.is_admin) {
         // Check 1: Overall account/trial expiry
         if (effectiveAccountExpiryDate && now >= effectiveAccountExpiryDate) {
-          // Deactivate all services for this user if their period is over.
+          // This case means their premium or trial has definitely expired.
+          // The background job should handle deactivating services, but this is a safeguard.
           await db.run(
-            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND is_active = 1",
             [decoded.userId]
           );
-          // Also update user status if premium expired
-          if (
-            user.is_premium &&
-            (!user.premium_expiry_date ||
-              new Date(user.premium_expiry_date) <= now)
-          ) {
-            await db.run("UPDATE users SET is_premium = 0 WHERE id = ?", [
-              decoded.userId,
-            ]);
-            // Ideally, notify user their premium expired
+          if (user.is_premium) {
+            // If they were premium and expired, mark as not premium
+            await db.run(
+              "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+              [decoded.userId]
+            );
           }
-          // For normal user, their trial has expired.
+          for (const svc of await db.all(
+            "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+            [decoded.userId]
+          )) {
+            await stopService(decoded.userId, svc.id);
+          }
           return NextResponse.json(
             {
               success: false,
               error:
-                "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. لطفاً اشتراک خود را ارتقا دهید.",
+                "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی وجود ندارد. لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.",
             },
             { status: 403 }
           );
         }
 
         // Check 2: Tier-based active service limits
-        if (
-          user.is_premium &&
-          user.premium_expiry_date &&
-          new Date(user.premium_expiry_date) > now
-        ) {
-          // Premium User Activation Logic
+        if (userIsEffectivelyPremium && !user.is_admin) {
+          // Premium (non-admin) user
           const activeServicesCount = await db.get(
             "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
             [decoded.userId, serviceIdToUpdate]
@@ -288,8 +320,8 @@ export async function PUT(request) {
               { status: 403 }
             );
           }
-        } else {
-          // Normal User Activation Logic
+        } else if (!userIsEffectivelyPremium && !user.is_admin) {
+          // Normal User (or expired premium behaving as normal)
           const activeServicesCount = await db.get(
             "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
             [decoded.userId, serviceIdToUpdate]
@@ -326,17 +358,16 @@ export async function PUT(request) {
         }
       }
     }
-    // --- End of Limit Checks for Activation ---
 
     let updateServiceSQL = `UPDATE forwarding_services SET is_active = ?, updated_at = CURRENT_TIMESTAMP`;
     const updateServiceParams = [isActive ? 1 : 0];
 
-    // For `service_activated_at` (specific to one service, mostly for admin view/edit now)
     if (isActive && !serviceToUpdate.service_activated_at) {
+      // Set on first activation of THIS service
       updateServiceSQL += `, service_activated_at = CURRENT_TIMESTAMP`;
     }
-    // For `activated_at` (general last activation time of this service)
     if (isActive) {
+      // Always update last general activation time
       updateServiceSQL += `, activated_at = CURRENT_TIMESTAMP`;
     }
 
@@ -344,7 +375,8 @@ export async function PUT(request) {
     updateServiceParams.push(serviceIdToUpdate, decoded.userId);
     await db.run(updateServiceSQL, ...updateServiceParams);
 
-    // Update user's trial_activated_at and premium_expiry_date (for normal user's 15-day trial)
+    // Set user's trial_activated_at and calculate premium_expiry_date (for normal user's 15-day trial)
+    // This happens when a normal user activates *any* service for the *very first time*
     if (
       isActive &&
       !user.is_admin &&
@@ -362,7 +394,7 @@ export async function PUT(request) {
       console.log(
         `Normal user ${
           decoded.userId
-        } trial started. Expires: ${trialEnd.toISOString()}`
+        } trial started. Expires: ${trialEnd.toISOString()}. Trial activated at: ${trialStart.toISOString()}`
       );
     }
 
@@ -392,7 +424,6 @@ export async function PUT(request) {
   }
 }
 
-// DELETE function remains the same as in Phase 3 (New)
 export async function DELETE(request) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -407,6 +438,9 @@ export async function DELETE(request) {
 
     const { id } = await request.json();
     const db = await openDb();
+
+    // Note: Deleting a service does not reset trial_activated_at or premium_expiry_date for normal users.
+    // The 15-day window is for the user, not per service.
 
     try {
       console.log(`🗑️ Stopping service ${id} before deletion`);

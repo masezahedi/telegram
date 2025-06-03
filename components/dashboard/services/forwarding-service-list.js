@@ -16,6 +16,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import ForwardingServiceForm from "./forwarding-service-form";
+import { Alert, AlertDescription } from "@/components/ui/alert"; // Added
+import { Info } from "lucide-react"; // Added
 
 export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [services, setServices] = useState([]);
@@ -23,11 +25,8 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [editingService, setEditingService] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
-  useEffect(() => {
-    loadServices();
-  }, []);
-
   const loadServices = async () => {
+    setLoading(true); // Ensure loading is true at the start
     try {
       const data = await ForwardingService.getServices();
       setServices(data);
@@ -39,41 +38,53 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     }
   };
 
-  const handleStatusChange = async (id, isActive) => {
-    try {
-      if (isActive && userAccountStatus?.isExpired) {
-        toast.error(
-          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی وجود ندارد."
-        );
-        // Optionally, refresh services to reflect any server-side deactivations
-        loadServices();
-        return;
-      }
+  useEffect(() => {
+    loadServices();
+  }, []); // Load services on initial mount
 
-      const result = await ForwardingService.updateServiceStatus(id, isActive);
+  const handleStatusChange = async (id, newIsActiveStatus) => {
+    if (
+      newIsActiveStatus &&
+      userAccountStatus?.isExpired &&
+      !userAccountStatus?.isAdmin
+    ) {
+      toast.error(
+        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد."
+      );
+      await loadServices(); // Refresh list to show actual state from server
+      return;
+    }
+    try {
+      const result = await ForwardingService.updateServiceStatus(
+        id,
+        newIsActiveStatus
+      );
       if (result.success) {
-        setServices(
-          services.map((service) =>
-            service.id === id ? { ...service, is_active: isActive } : service
-          )
-        );
+        // setServices(
+        //   services.map((service) =>
+        //     service.id === id ? { ...service, is_active: newIsActiveStatus } : service
+        //   )
+        // ); // Optimistic update
+        await loadServices(); // Fetch fresh list from server
         toast.success(
-          isActive ? "سرویس با موفقیت فعال شد" : "سرویس با موفقیت غیرفعال شد"
+          newIsActiveStatus
+            ? "سرویس با موفقیت فعال شد"
+            : "سرویس با موفقیت غیرفعال شد"
         );
+        onUpdate?.(); // Notify parent to refresh user status
       } else {
         toast.error(result.error || "خطا در تغییر وضعیت سرویس");
-        loadServices(); // Reload services in case of server-side denial
+        await loadServices(); // Refresh list if server denied the change
       }
     } catch (error) {
       console.error("Update service status error:", error);
       toast.error("خطا در تغییر وضعیت سرویس");
-      loadServices(); // Reload services
+      await loadServices(); // Refresh list on any error
     }
   };
 
   const handleDelete = async (id) => {
     if (!confirm("آیا از حذف این سرویس اطمینان دارید؟")) return;
-
     try {
       const result = await ForwardingService.deleteService(id);
       if (result.success) {
@@ -90,6 +101,16 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   };
 
   const handleEdit = (service) => {
+    if (
+      userAccountStatus?.isExpired &&
+      !userAccountStatus?.isPremium &&
+      !userAccountStatus?.isAdmin
+    ) {
+      toast.error(
+        "مهلت استفاده شما به پایان رسیده و امکان ویرایش سرویس وجود ندارد."
+      );
+      return;
+    }
     setEditingService(service);
     setShowForm(true);
   };
@@ -97,8 +118,8 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const handleFormSuccess = () => {
     setEditingService(null);
     setShowForm(false);
-    loadServices();
-    onUpdate?.();
+    loadServices(); // Reload services after form success
+    onUpdate?.(); // Notify parent
   };
 
   if (loading) {
@@ -135,20 +156,33 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     );
   }
 
+  // Disable "Create New Service" button if normal user's trial is expired
+  const disableCreateNew =
+    userAccountStatus?.isExpired &&
+    !userAccountStatus?.isPremium &&
+    !userAccountStatus?.isAdmin;
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
         <Button
           onClick={() => setShowForm(true)}
           className="gap-2"
-          disabled={
-            userAccountStatus?.isExpired && !userAccountStatus?.isPremium
-          } // Disable creating new if normal user trial expired
+          disabled={disableCreateNew}
         >
           <Plus className="h-4 w-4" />
           ایجاد سرویس جدید
         </Button>
       </div>
+      {disableCreateNew && (
+        <Alert variant="destructive" className="mt-2">
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            امکان ایجاد سرویس جدید وجود ندارد. مهلت استفاده شما به پایان رسیده
+            است.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {services.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
@@ -183,10 +217,16 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    {service.source_channels.join(", ")}
+                    {(Array.isArray(service.source_channels)
+                      ? service.source_channels
+                      : []
+                    ).join(", ")}
                   </TableCell>
                   <TableCell className="text-right">
-                    {service.target_channels.join(", ")}
+                    {(Array.isArray(service.target_channels)
+                      ? service.target_channels
+                      : []
+                    ).join(", ")}
                   </TableCell>
                   <TableCell className="text-right">
                     <Switch
@@ -194,9 +234,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                       onCheckedChange={(checked) =>
                         handleStatusChange(service.id, checked)
                       }
-                      // Disable activation if account is expired, unless it's already active (allowing deactivation)
+                      // Disable activation if account is expired, but allow deactivation
                       disabled={
-                        userAccountStatus?.isExpired && !service.is_active
+                        userAccountStatus?.isExpired &&
+                        !service.is_active &&
+                        !userAccountStatus?.isAdmin
                       }
                     />
                   </TableCell>
@@ -206,6 +248,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleEdit(service)}
+                        disabled={
+                          userAccountStatus?.isExpired &&
+                          !userAccountStatus?.isPremium &&
+                          !userAccountStatus?.isAdmin
+                        }
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -213,6 +260,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDelete(service.id)}
+                        // Deletion is always allowed
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
