@@ -76,7 +76,7 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    
+
     --success: 142 71% 45%;
     --success-foreground: 142 10% 98%;
     --warning: 38 92% 50%;
@@ -97,7 +97,7 @@
 
 /* Custom Styles */
 .font-vazirmatn {
-  font-family: 'Vazirmatn', sans-serif;
+  font-family: "Vazirmatn", sans-serif;
 }
 
 .blinking {
@@ -105,9 +105,15 @@
 }
 
 @keyframes blink {
-  0% { opacity: 1; }
-  50% { opacity: 0.5; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .connection-status {
@@ -168,7 +174,7 @@
 }
 
 .service-card::before {
-  content: '';
+  content: "";
   @apply absolute inset-0 bg-gradient-to-r from-primary/5 to-accent/5 opacity-0 transition-opacity duration-300;
 }
 
@@ -181,9 +187,17 @@
   animation: fadeIn 0.5s ease-in-out;
 }
 
+.dir-rtl {
+  direction: rtl !important;
+}
+
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .slide-up {
