@@ -143,7 +143,7 @@ export default function ForwardingServiceForm({
       useAI: Boolean(service?.prompt_template),
       promptTemplate:
         service?.prompt_template ||
-        "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
+        "پیام زیر را به فارسی روان ترجمه کن  :\n\n{text}",
       searchReplaceRules: service?.search_replace_rules
         ? (Array.isArray(service.search_replace_rules)
             ? service.search_replace_rules
@@ -327,8 +327,7 @@ export default function ForwardingServiceForm({
           sourceChannels: [""],
           targetChannels: [""],
           useAI: false,
-          promptTemplate:
-            "پیام زیر را به فارسی روان ترجمه کن و اگر لینک داشت، لینک ها را حذف کن و اگر تبلیغاتی در آن بود آن را نیز حذف کن:\n\n{text}",
+          promptTemplate: "پیام زیر را به فارسی روان ترجمه کن  :\n\n{text}",
           searchReplaceRules: [{ search: "", replace: "" }],
           copyHistory: false,
           historyLimit: 100,
