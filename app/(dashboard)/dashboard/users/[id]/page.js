@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import DashboardLayout from "@/components/dashboard/dashboard-layout";
 import { Copy, Edit3 } from "lucide-react";
-import { Switch } from "@/components/ui/switch"; // For is_premium toggle
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -31,21 +31,36 @@ import {
 
 export default function UserDetails({ params }) {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState(null);
-  const [userData, setUserData] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null); // Logged-in admin user
+  const [userData, setUserData] = useState(null); // The user whose details are being viewed
   const [loading, setLoading] = useState(true);
   const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
 
-  // State for the edit premium dialog
   const [editIsPremium, setEditIsPremium] = useState(false);
   const [editPremiumExpiryDate, setEditPremiumExpiryDate] = useState("");
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
-  const fetchUserData = async () => {
+  const fetchSpecificUserData = async () => {
+    // Renamed to avoid confusion
     try {
       const userDetails = await UserService.getUserDetails(params.id);
-      setUserData(userDetails);
       if (userDetails) {
+        setUserData({
+          ...userDetails,
+          // Ensure services and their channel lists are properly parsed if they come as JSON strings
+          services: (userDetails.services || []).map((service) => ({
+            ...service,
+            source_channels: Array.isArray(service.source_channels)
+              ? service.source_channels
+              : JSON.parse(service.source_channels || "[]"),
+            target_channels: Array.isArray(service.target_channels)
+              ? service.target_channels
+              : JSON.parse(service.target_channels || "[]"),
+            search_replace_rules: Array.isArray(service.search_replace_rules)
+              ? service.search_replace_rules
+              : JSON.parse(service.search_replace_rules || "[]"),
+          })),
+        });
         setEditIsPremium(Boolean(userDetails.is_premium));
         setEditPremiumExpiryDate(
           userDetails.premium_expiry_date
@@ -54,6 +69,10 @@ export default function UserDetails({ params }) {
                 .split("T")[0]
             : ""
         );
+      } else {
+        toast.error("کاربر مورد نظر یافت نشد.");
+        // Optionally redirect if user not found, or handle in UI
+        // router.replace('/dashboard/users');
       }
     } catch (error) {
       console.error("Error loading user details:", error);
@@ -71,17 +90,19 @@ export default function UserDetails({ params }) {
           return;
         }
 
-        const user = AuthService.getStoredUser();
-        if (!user?.isAdmin) {
-          // Corrected to isAdmin
+        const loggedInUser = AuthService.getStoredUser(); // Get the currently logged-in user
+        if (!loggedInUser?.isAdmin) {
+          toast.error("دسترسی غیر مجاز. شما ادمین نیستید.");
           router.replace("/dashboard");
           return;
         }
-        setCurrentUser(user);
-        await fetchUserData();
+        setCurrentUser(loggedInUser); // Set the admin user for the layout
+        await fetchSpecificUserData(); // Fetch the details of the user specified by params.id
       } catch (error) {
         console.error("Auth or data loading error:", error);
         toast.error("خطا در بارگذاری صفحه");
+        // Potentially redirect to a general error page or dashboard
+        // router.replace('/dashboard');
       } finally {
         setLoading(false);
       }
@@ -91,8 +112,12 @@ export default function UserDetails({ params }) {
   }, [router, params.id]);
 
   const copyToClipboard = (text, message) => {
-    navigator.clipboard.writeText(text);
-    toast.success(message);
+    if (text && typeof text === "string") {
+      navigator.clipboard.writeText(text);
+      toast.success(message);
+    } else {
+      toast.error("مقداری برای کپی وجود ندارد.");
+    }
   };
 
   const handlePremiumUpdate = async (e) => {
@@ -116,8 +141,8 @@ export default function UserDetails({ params }) {
       const result = await response.json();
       if (result.success) {
         toast.success("وضعیت پرمیوم کاربر با موفقیت بروزرسانی شد.");
-        await fetchUserData(); // Refresh user data
-        setIsEditDialogOpen(false); // Close dialog
+        await fetchSpecificUserData();
+        setIsEditDialogOpen(false);
       } else {
         toast.error(result.error || "خطا در بروزرسانی وضعیت پرمیوم.");
       }
@@ -142,7 +167,16 @@ export default function UserDetails({ params }) {
   if (!userData) {
     return (
       <DashboardLayout user={currentUser}>
-        <div className="p-6 text-center">کاربر یافت نشد.</div>
+        <div className="p-6 text-center">
+          <p>اطلاعات کاربر در حال بارگذاری است یا کاربر یافت نشد.</p>
+          <Button
+            onClick={() => router.push("/dashboard/users")}
+            variant="outline"
+            className="mt-4"
+          >
+            بازگشت به لیست کاربران
+          </Button>
+        </div>
       </DashboardLayout>
     );
   }
@@ -158,7 +192,6 @@ export default function UserDetails({ params }) {
   return (
     <DashboardLayout user={currentUser}>
       <div className="p-6 space-y-6">
-        {/* User Profile */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -262,7 +295,7 @@ export default function UserDetails({ params }) {
                 <Input value={formattedPremiumExpiry} readOnly />
               </div>
               <div>
-                <Label>تعداد سرویس ایجاد شده (عمر)</Label>
+                <Label>تعداد سرویس ایجاد شده</Label>
                 <Input
                   value={
                     userData.service_creation_count !== undefined
@@ -327,7 +360,8 @@ export default function UserDetails({ params }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {userData.services?.length > 0 ? (
+            {/* Ensure userData and userData.services are available before trying to map */}
+            {userData && userData.services && userData.services.length > 0 ? (
               <div className="space-y-4">
                 {userData.services.map((service) => (
                   <Card key={service.id}>
@@ -358,16 +392,22 @@ export default function UserDetails({ params }) {
                             <Label className="text-xs text-muted-foreground">
                               کانال‌های مبدا
                             </Label>
+                            {/* Ensure service.source_channels is an array before join */}
                             <div className="mt-1 text-sm">
-                              {service.source_channels.join(", ")}
+                              {Array.isArray(service.source_channels)
+                                ? service.source_channels.join(", ")
+                                : service.source_channels || ""}
                             </div>
                           </div>
                           <div>
                             <Label className="text-xs text-muted-foreground">
                               کانال‌های مقصد
                             </Label>
+                            {/* Ensure service.target_channels is an array before join */}
                             <div className="mt-1 text-sm">
-                              {service.target_channels.join(", ")}
+                              {Array.isArray(service.target_channels)
+                                ? service.target_channels.join(", ")
+                                : service.target_channels || ""}
                             </div>
                           </div>
                         </div>
