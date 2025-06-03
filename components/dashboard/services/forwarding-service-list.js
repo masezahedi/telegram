@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Info, Eye } from "lucide-react"; // Added Eye for "مشاهده"
+// MessageCircle به لیست ایمپورت‌ها اضافه شده است
+import { Plus, Pencil, Trash2, Info, Eye, MessageCircle } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,18 +13,18 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  TableCaption, // Added TableCaption
+  TableCaption,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import ForwardingServiceForm from "./forwarding-service-form";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Ensured AlertTitle is imported
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip"; // Added Tooltip
+} from "@/components/ui/tooltip";
 
 export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [services, setServices] = useState([]);
@@ -139,8 +140,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   if (showForm) {
     return (
       <div className="space-y-6 p-1">
-        {" "}
-        {/* Added small padding */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-semibold">
             {editingService ? "ویرایش سرویس" : "ایجاد سرویس جدید"}
@@ -173,11 +172,9 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     <TooltipProvider delayDuration={100}>
       <div className="space-y-4">
         <div className="flex justify-start">
-          {" "}
-          {/* Changed to justify-start for RTL */}
           <Button
             onClick={() => setShowForm(true)}
-            className="gap-x-2" // Use gap-x-2 for horizontal gap, automatically handles RTL
+            className="gap-x-2"
             disabled={disableCreateNew}
           >
             <Plus className="h-4 w-4" />
@@ -197,17 +194,14 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
 
         {services.length === 0 && !loading ? (
           <div className="text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg mt-4">
-            <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+            <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />{" "}
+            {/* استفاده از MessageCircle */}
             <p className="font-semibold">هیچ سرویسی یافت نشد.</p>
             <p className="text-sm">برای شروع، یک سرویس جدید ایجاد کنید.</p>
           </div>
         ) : (
           <div className="rounded-md border overflow-x-auto">
-            {" "}
-            {/* Added overflow-x-auto for responsiveness */}
             <Table className="min-w-full">
-              {" "}
-              {/* Ensure table takes minimum full width */}
               <TableCaption className="py-4">
                 لیست سرویس‌های فوروارد و کپی شما.
               </TableCaption>
@@ -215,8 +209,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                 <TableRow>
                   <TableHead className="text-right w-[200px]">
                     نام سرویس
-                  </TableHead>{" "}
-                  {/* Added w- class for base width */}
+                  </TableHead>
                   <TableHead className="text-right w-[150px]">
                     نوع سرویس
                   </TableHead>
@@ -225,8 +218,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                   <TableHead className="text-right w-[100px]">وضعیت</TableHead>
                   <TableHead className="text-center w-[120px]">
                     عملیات
-                  </TableHead>{" "}
-                  {/* Centered operations */}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -248,8 +240,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right py-3 max-w-xs truncate">
-                      {" "}
-                      {/* Added truncate for long lists */}
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-default">
@@ -260,7 +250,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>
+                          <p className="text-right">
                             {(Array.isArray(service.source_channels)
                               ? service.source_channels
                               : []
@@ -282,7 +272,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>
+                          <p className="text-right">
                             {(Array.isArray(service.target_channels)
                               ? service.target_channels
                               : []
@@ -309,8 +299,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                     </TableCell>
                     <TableCell className="text-center py-3">
                       <div className="flex justify-center gap-x-1">
-                        {" "}
-                        {/* Use gap-x for horizontal spacing */}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button

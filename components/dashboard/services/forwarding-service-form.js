@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useForm, Controller } from "react-hook-form"; // Controller import might be needed for some complex fields
+import { useForm, Controller, useFieldArray } from "react-hook-form"; // useFieldArray اضافه شد
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -17,7 +17,7 @@ import {
   CopyCheck,
   MessageSquareText,
   Brain,
-} from "lucide-react"; // Added more icons
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -39,7 +39,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import { AuthService } from "@/lib/services/auth-service";
 import { SettingsService } from "@/lib/services/settings-service";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; // Added Card for grouping
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const formSchema = z.object({
   name: z.string().min(2, {
@@ -68,15 +68,12 @@ const formSchema = z.object({
     .array(
       z
         .object({
-          search: z.string().optional(), // Optional to allow empty search for a rule, but filtered out later if both empty
+          search: z.string().optional(),
           replace: z.string().optional(),
         })
         .refine((data) => data.search || data.replace, {
-          // At least one must be present if rule is to be considered
           message:
             "حداقل یکی از فیلدهای جستجو یا جایگزینی باید پر شود اگر قانون اضافه شده.",
-          // This refine might be too aggressive if we allow truly empty rules that get filtered.
-          // The main filtering happens in onSubmit.
         })
     )
     .optional(),
@@ -164,6 +161,22 @@ export default function ForwardingServiceForm({
     checkRequirements();
   }, []);
 
+  const {
+    fields: sourceFields,
+    append: appendSource,
+    remove: removeSource,
+  } = useFieldArray({ control: form.control, name: "sourceChannels" });
+  const {
+    fields: targetFields,
+    append: appendTarget,
+    remove: removeTarget,
+  } = useFieldArray({ control: form.control, name: "targetChannels" });
+  const {
+    fields: ruleFields,
+    append: appendRule,
+    remove: removeRule,
+  } = useFieldArray({ control: form.control, name: "searchReplaceRules" });
+
   const onSubmit = async (values) => {
     if (!isTelegramConnected) {
       toast.error("لطفاً ابتدا به تلگرام متصل شوید");
@@ -193,14 +206,14 @@ export default function ForwardingServiceForm({
       form.setError("sourceChannels.0", {
         type: "manual",
         message: "حداقل یک کانال مبدا الزامی است.",
-      }); // Target first field for error
+      });
       return;
     }
     if (finalTargetChannels.length === 0) {
       form.setError("targetChannels.0", {
         type: "manual",
         message: "حداقل یک کانال مقصد الزامی است.",
-      }); // Target first field for error
+      });
       return;
     }
 
@@ -235,7 +248,7 @@ export default function ForwardingServiceForm({
         searchReplaceRules: values.searchReplaceRules.filter(
           (rule) => rule.search || rule.replace
         ),
-        promptTemplate: values.useAI ? values.promptTemplate : "", // Send empty string if not useAI to clear it
+        promptTemplate: values.useAI ? values.promptTemplate : "",
         copyHistory: values.type === "copy" ? values.copyHistory : false,
         historyLimit:
           values.type === "copy" && values.copyHistory
@@ -287,37 +300,43 @@ export default function ForwardingServiceForm({
     }
   };
 
-  const {
-    fields: sourceFields,
-    append: appendSource,
-    remove: removeSource,
-  } = useFieldArray({ control: form.control, name: "sourceChannels" });
-  const {
-    fields: targetFields,
-    append: appendTarget,
-    remove: removeTarget,
-  } = useFieldArray({ control: form.control, name: "targetChannels" });
-  const {
-    fields: ruleFields,
-    append: appendRule,
-    remove: removeRule,
-  } = useFieldArray({ control: form.control, name: "searchReplaceRules" });
-
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
   const copyHistoryEnabled = form.watch("copyHistory");
   const startFromIdWatched = form.watch("startFromId");
 
   if (!isTelegramConnected) {
-    /* ... */
+    return (
+      <div className="text-center py-8">
+        <p className="text-destructive mb-4">
+          برای ایجاد سرویس، ابتدا باید به تلگرام متصل شوید
+        </p>
+        <Button
+          variant="outline"
+          onClick={() => (window.location.href = "/dashboard")}
+        >
+          اتصال به تلگرام
+        </Button>
+      </div>
+    );
   }
+
   if (
     userAccountStatus?.isExpired &&
     !service?.id &&
     !userAccountStatus?.isPremium &&
     !userAccountStatus?.isAdmin
   ) {
-    /* ... */
+    return (
+      <Alert variant="destructive">
+        <Info className="h-4 w-4" />
+        <AlertTitle>مهلت استفاده به پایان رسیده</AlertTitle>
+        <AlertDescription>
+          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
+          لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.
+        </AlertDescription>
+      </Alert>
+    );
   }
 
   return (
@@ -405,7 +424,6 @@ export default function ForwardingServiceForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Source Channels */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium">
                 {" "}
@@ -414,42 +432,51 @@ export default function ForwardingServiceForm({
               <FormDescription>
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {sourceFields.map((field, index) => (
-                <FormField
-                  key={field.id}
-                  control={form.control}
-                  name={`sourceChannels.${index}`}
-                  render={({ field: controlledField }) => (
-                    <FormItem>
-                      <div className="flex items-center gap-x-2">
-                        <FormControl>
-                          <Input
-                            placeholder="@SourceChannel"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        {!isCopyService && sourceFields.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => removeSource(index)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ))}
+              {sourceFields.map(
+                (
+                  item,
+                  index // Changed field to item to avoid conflict
+                ) => (
+                  <FormField
+                    key={item.id}
+                    control={form.control}
+                    name={`sourceChannels.${index}`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <div className="flex items-center gap-x-2">
+                          <FormControl>
+                            <Input
+                              placeholder={
+                                isCopyService
+                                  ? "@SourceChannel"
+                                  : "@SourceChannel or multiple"
+                              }
+                              {...controlledField}
+                            />
+                          </FormControl>
+                          {!isCopyService && sourceFields.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => removeSource(index)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )
+              )}
               {!isCopyService && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => appendSource("")}
+                  onClick={() => appendSource({ value: "" })}
                   className="w-full gap-x-1"
                 >
                   <Plus className="h-4 w-4" />
@@ -458,7 +485,6 @@ export default function ForwardingServiceForm({
               )}
             </div>
 
-            {/* Target Channels */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium">
                 {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
@@ -466,42 +492,51 @@ export default function ForwardingServiceForm({
               <FormDescription>
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
-              {targetFields.map((field, index) => (
-                <FormField
-                  key={field.id}
-                  control={form.control}
-                  name={`targetChannels.${index}`}
-                  render={({ field: controlledField }) => (
-                    <FormItem>
-                      <div className="flex items-center gap-x-2">
-                        <FormControl>
-                          <Input
-                            placeholder="@TargetChannel"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        {!isCopyService && targetFields.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => removeTarget(index)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ))}
+              {targetFields.map(
+                (
+                  item,
+                  index // Changed field to item
+                ) => (
+                  <FormField
+                    key={item.id}
+                    control={form.control}
+                    name={`targetChannels.${index}`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <div className="flex items-center gap-x-2">
+                          <FormControl>
+                            <Input
+                              placeholder={
+                                isCopyService
+                                  ? "@TargetChannel"
+                                  : "@TargetChannel or multiple"
+                              }
+                              {...controlledField}
+                            />
+                          </FormControl>
+                          {!isCopyService && targetFields.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => removeTarget(index)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )
+              )}
               {!isCopyService && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => appendTarget("")}
+                  onClick={() => appendTarget({ value: "" })}
                   className="w-full gap-x-1"
                 >
                   <Plus className="h-4 w-4" />
@@ -512,7 +547,6 @@ export default function ForwardingServiceForm({
           </CardContent>
         </Card>
 
-        {/* Copy Service Specific Fields */}
         {isCopyService && (
           <Card>
             <CardHeader>
@@ -661,7 +695,6 @@ export default function ForwardingServiceForm({
           </Card>
         )}
 
-        {/* AI Fields */}
         <Card>
           <CardHeader>
             <CardTitle className="text-right flex items-center gap-x-2">
@@ -737,7 +770,6 @@ export default function ForwardingServiceForm({
           </CardContent>
         </Card>
 
-        {/* Search/Replace Rules */}
         <Card>
           <CardHeader>
             <CardTitle className="text-right flex items-center gap-x-2">
@@ -750,57 +782,62 @@ export default function ForwardingServiceForm({
               قوانینی برای جستجو و جایگزینی عبارات خاص در متن پیام‌ها تعریف
               کنید.
             </FormDescription>
-            {ruleFields.map((field, index) => (
-              <div
-                key={field.id}
-                className="flex items-start gap-x-2 p-3 border rounded-md bg-muted/20"
-              >
-                <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                  <FormField
-                    control={form.control}
-                    name={`searchReplaceRules.${index}.search`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <FormLabel>متن جستجو</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="عبارتی که می‌خواهید پیدا شود"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name={`searchReplaceRules.${index}.replace`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <FormLabel>متن جایگزین</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeRule(index)}
-                  className="mt-auto text-destructive hover:text-destructive/80 self-end sm:self-center shrink-0"
+            {ruleFields.map(
+              (
+                item,
+                index // Changed field to item
+              ) => (
+                <div
+                  key={item.id}
+                  className="flex items-start gap-x-2 p-3 border rounded-md bg-muted/20"
                 >
-                  <Trash2 className="h-4 w-4" />
-                  <span className="sr-only">حذف قانون</span>
-                </Button>
-              </div>
-            ))}
+                  <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                    <FormField
+                      control={form.control}
+                      name={`searchReplaceRules.${index}.search`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <FormLabel>متن جستجو</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="عبارتی که می‌خواهید پیدا شود"
+                              {...controlledField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`searchReplaceRules.${index}.replace`}
+                      render={({ field: controlledField }) => (
+                        <FormItem>
+                          <FormLabel>متن جایگزین</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
+                              {...controlledField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeRule(index)}
+                    className="mt-auto text-destructive hover:text-destructive/80 self-end sm:self-center shrink-0"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="sr-only">حذف قانون</span>
+                  </Button>
+                </div>
+              )
+            )}
             <Button
               type="button"
               variant="outline"
