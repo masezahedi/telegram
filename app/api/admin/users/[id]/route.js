@@ -5,7 +5,7 @@ import { openDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-// GET function remains the same as provided in the uploaded files for user details
+// GET function remains the same
 export async function GET(request, { params }) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -26,7 +26,7 @@ export async function GET(request, { params }) {
 
     if (!adminCheck?.is_admin) {
       return NextResponse.json(
-        { success: false, error: "Forbidden" }, // Changed from Unauthorized to Forbidden for clarity
+        { success: false, error: "Forbidden" },
         { status: 403 }
       );
     }
@@ -34,16 +34,9 @@ export async function GET(request, { params }) {
     const user = await db.get(
       `
       SELECT 
-        u.id,
-        u.name,
-        u.email,
-        u.phone_number,
-        u.telegram_session,
-        u.is_admin,
-        u.is_premium,
-        u.premium_expiry_date,
-        u.service_creation_count,
-        u.created_at,
+        u.id, u.name, u.email, u.phone_number, u.telegram_session,
+        u.is_admin, u.is_premium, u.premium_expiry_date, 
+        u.trial_activated_at, u.service_creation_count, u.created_at,
         us.gemini_api_key
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
@@ -61,10 +54,7 @@ export async function GET(request, { params }) {
 
     const services = await db.all(
       `
-      SELECT *
-      FROM forwarding_services
-      WHERE user_id = ?
-      ORDER BY created_at DESC
+      SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC
     `,
       [params.id]
     );
@@ -92,7 +82,6 @@ export async function GET(request, { params }) {
   }
 }
 
-// New PUT function for admin to update premium status
 export async function PUT(request, { params }) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -117,15 +106,24 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const { userIdToUpdate } = params; // This should be `params.id` based on folder structure `[id]`
-    const { is_premium, premium_expiry_date } = await request.json();
+    const { id: userIdToUpdate } = params; // Correctly get userIdToUpdate from params
+    const payload = await request.json();
 
-    if (typeof is_premium !== "boolean" && premium_expiry_date === undefined) {
+    // Check if at least one valid field is provided for update
+    const validFields = [
+      "is_premium",
+      "premium_expiry_date",
+      "trial_activated_at",
+    ];
+    const providedFields = Object.keys(payload).filter((key) =>
+      validFields.includes(key)
+    );
+
+    if (providedFields.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          error:
-            "حداقل یکی از فیلدهای is_premium یا premium_expiry_date باید ارسال شود",
+          error: "هیچ فیلد معتبری برای به‌روزرسانی ارسال نشده است.",
         },
         { status: 400 }
       );
@@ -134,21 +132,47 @@ export async function PUT(request, { params }) {
     let sql = "UPDATE users SET updated_at = CURRENT_TIMESTAMP";
     const queryParams = [];
 
-    if (typeof is_premium === "boolean") {
+    if (
+      payload.hasOwnProperty("is_premium") &&
+      typeof payload.is_premium === "boolean"
+    ) {
       sql += ", is_premium = ?";
-      queryParams.push(is_premium ? 1 : 0);
+      queryParams.push(payload.is_premium ? 1 : 0);
     }
 
-    if (premium_expiry_date !== undefined) {
-      // Allow setting to null
+    if (payload.hasOwnProperty("premium_expiry_date")) {
+      // Allows setting to null
       sql += ", premium_expiry_date = ?";
       queryParams.push(
-        premium_expiry_date ? new Date(premium_expiry_date).toISOString() : null
+        payload.premium_expiry_date
+          ? new Date(payload.premium_expiry_date).toISOString()
+          : null
+      );
+    }
+
+    if (payload.hasOwnProperty("trial_activated_at")) {
+      // Allows setting to null
+      sql += ", trial_activated_at = ?";
+      queryParams.push(
+        payload.trial_activated_at
+          ? new Date(payload.trial_activated_at).toISOString()
+          : null
       );
     }
 
     sql += " WHERE id = ?";
-    queryParams.push(params.id); // Use params.id which corresponds to [id]
+    queryParams.push(userIdToUpdate);
+
+    if (queryParams.length === 1) {
+      // Only userId was added, means no valid fields to update
+      return NextResponse.json(
+        {
+          success: false,
+          error: "فیلدهای ارسالی برای به‌روزرسانی معتبر نیستند.",
+        },
+        { status: 400 }
+      );
+    }
 
     const result = await db.run(sql, ...queryParams);
 
@@ -159,21 +183,24 @@ export async function PUT(request, { params }) {
       );
     }
 
-    // Optionally, fetch and return the updated user
     const updatedUser = await db.get(
-      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date FROM users WHERE id = ?",
-      [params.id]
+      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
+      [userIdToUpdate]
     );
 
     return NextResponse.json({
       success: true,
-      message: "وضعیت پرمیوم کاربر با موفقیت به‌روزرسانی شد.",
-      user: updatedUser,
+      message: "اطلاعات کاربر با موفقیت به‌روزرسانی شد.",
+      user: {
+        ...updatedUser,
+        is_admin: Boolean(updatedUser.is_admin),
+        is_premium: Boolean(updatedUser.is_premium),
+      },
     });
   } catch (error) {
-    console.error("Admin update user premium error:", error);
+    console.error("Admin update user error:", error); // Changed error message
     return NextResponse.json(
-      { success: false, error: "خطا در سرور هنگام به‌روزرسانی کاربر" },
+      { success: false, error: "خطا در سرور هنگام به‌روزرسانی اطلاعات کاربر." }, // Changed error message
       { status: 500 }
     );
   }
