@@ -193,10 +193,10 @@ export async function PUT(request) {
       );
     }
 
-    const { id, isActive } = await request.json(); // Service ID and new active state
+    const { id: serviceIdToUpdate, isActive } = await request.json(); // serviceIdToUpdate, new active state
     const db = await openDb();
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date FROM users WHERE id = ?",
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
       [decoded.userId]
     );
 
@@ -207,10 +207,9 @@ export async function PUT(request) {
       );
     }
 
-    const now = new Date();
-    let serviceToUpdate = await db.get(
+    const serviceToUpdate = await db.get(
       "SELECT * FROM forwarding_services WHERE id = ? AND user_id = ?",
-      [id, decoded.userId]
+      [serviceIdToUpdate, decoded.userId]
     );
 
     if (!serviceToUpdate) {
@@ -220,100 +219,164 @@ export async function PUT(request) {
       );
     }
 
+    const now = new Date();
+    let effectiveAccountExpiryDate = null;
+
+    if (
+      user.is_premium &&
+      user.premium_expiry_date &&
+      new Date(user.premium_expiry_date) > now
+    ) {
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+    } else if (!user.is_admin && !user.is_premium && user.trial_activated_at) {
+      const trialEnd = new Date(user.trial_activated_at);
+      trialEnd.setDate(trialEnd.getDate() + 15);
+      effectiveAccountExpiryDate = trialEnd;
+    }
+
     // --- Start of Limit Checks for Activation ---
-    if (isActive && !user.is_admin) {
-      if (
-        user.is_premium &&
-        user.premium_expiry_date &&
-        new Date(user.premium_expiry_date) > now
-      ) {
-        // Premium User Activation Logic
-        const activeServicesCount = await db.get(
-          "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
-          [decoded.userId, id]
-        );
-        if (activeServicesCount.count >= 5) {
+    if (isActive) {
+      // Only apply these checks if trying to ACTIVATE a service
+      if (!user.is_admin) {
+        // Check 1: Overall account/trial expiry
+        if (effectiveAccountExpiryDate && now >= effectiveAccountExpiryDate) {
+          // Deactivate all services for this user if their period is over.
+          await db.run(
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            [decoded.userId]
+          );
+          // Also update user status if premium expired
+          if (
+            user.is_premium &&
+            (!user.premium_expiry_date ||
+              new Date(user.premium_expiry_date) <= now)
+          ) {
+            await db.run("UPDATE users SET is_premium = 0 WHERE id = ?", [
+              decoded.userId,
+            ]);
+            // Ideally, notify user their premium expired
+          }
+          // For normal user, their trial has expired.
           return NextResponse.json(
             {
               success: false,
               error:
-                "کاربران پرمیوم حداکثر می‌توانند ۵ سرویس فعال داشته باشند.",
-            },
-            { status: 403 }
-          );
-        }
-      } else {
-        // Normal User Activation Logic
-        const activeServicesCount = await db.get(
-          "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
-          [decoded.userId, id]
-        );
-        if (activeServicesCount.count >= 1) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "کاربران عادی فقط می‌توانند یک سرویس فعال داشته باشند.",
+                "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. لطفاً اشتراک خود را ارتقا دهید.",
             },
             { status: 403 }
           );
         }
 
-        const sourceChannels = JSON.parse(serviceToUpdate.source_channels);
-        const targetChannels = JSON.parse(serviceToUpdate.target_channels);
+        // Check 2: Tier-based active service limits
         if (
-          sourceChannels.filter(Boolean).length > 1 ||
-          targetChannels.filter(Boolean).length > 1
+          user.is_premium &&
+          user.premium_expiry_date &&
+          new Date(user.premium_expiry_date) > now
         ) {
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                "سرویس کاربران عادی فقط می‌تواند یک کانال مبدأ و یک کانال مقصد داشته باشد.",
-            },
-            { status: 403 }
+          // Premium User Activation Logic
+          const activeServicesCount = await db.get(
+            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
+            [decoded.userId, serviceIdToUpdate]
           );
+          if (activeServicesCount.count >= 5) {
+            return NextResponse.json(
+              {
+                success: false,
+                error:
+                  "کاربران پرمیوم حداکثر می‌توانند ۵ سرویس فعال داشته باشند.",
+              },
+              { status: 403 }
+            );
+          }
+        } else {
+          // Normal User Activation Logic
+          const activeServicesCount = await db.get(
+            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
+            [decoded.userId, serviceIdToUpdate]
+          );
+          if (activeServicesCount.count >= 1) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: "کاربران عادی فقط می‌توانند یک سرویس فعال داشته باشند.",
+              },
+              { status: 403 }
+            );
+          }
+
+          const sourceChannels = JSON.parse(
+            serviceToUpdate.source_channels || "[]"
+          );
+          const targetChannels = JSON.parse(
+            serviceToUpdate.target_channels || "[]"
+          );
+          if (
+            sourceChannels.filter(Boolean).length > 1 ||
+            targetChannels.filter(Boolean).length > 1
+          ) {
+            return NextResponse.json(
+              {
+                success: false,
+                error:
+                  "سرویس کاربران عادی فقط می‌تواند یک کانال مبدأ و یک کانال مقصد داشته باشد.",
+              },
+              { status: 403 }
+            );
+          }
         }
       }
     }
     // --- End of Limit Checks for Activation ---
 
-    let updateQuery = `
-      UPDATE forwarding_services
-      SET 
-        is_active = ?,
-        updated_at = CURRENT_TIMESTAMP`;
+    let updateServiceSQL = `UPDATE forwarding_services SET is_active = ?, updated_at = CURRENT_TIMESTAMP`;
+    const updateServiceParams = [isActive ? 1 : 0];
 
-    const queryParams = [isActive ? 1 : 0];
+    // For `service_activated_at` (specific to one service, mostly for admin view/edit now)
+    if (isActive && !serviceToUpdate.service_activated_at) {
+      updateServiceSQL += `, service_activated_at = CURRENT_TIMESTAMP`;
+    }
+    // For `activated_at` (general last activation time of this service)
+    if (isActive) {
+      updateServiceSQL += `, activated_at = CURRENT_TIMESTAMP`;
+    }
 
-    // Set service_activated_at only on the first activation for a normal user
+    updateServiceSQL += ` WHERE id = ? AND user_id = ?`;
+    updateServiceParams.push(serviceIdToUpdate, decoded.userId);
+    await db.run(updateServiceSQL, ...updateServiceParams);
+
+    // Update user's trial_activated_at and premium_expiry_date (for normal user's 15-day trial)
     if (
       isActive &&
       !user.is_admin &&
       !user.is_premium &&
-      !serviceToUpdate.service_activated_at
+      !user.trial_activated_at
     ) {
-      updateQuery += `, service_activated_at = CURRENT_TIMESTAMP`;
+      const trialStart = new Date();
+      const trialEnd = new Date(trialStart);
+      trialEnd.setDate(trialStart.getDate() + 15);
+
+      await db.run(
+        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
+      );
+      console.log(
+        `Normal user ${
+          decoded.userId
+        } trial started. Expires: ${trialEnd.toISOString()}`
+      );
     }
-
-    // The old `activated_at` might still be useful for tracking last activation,
-    // but for 15-day expiry, `service_activated_at` is key.
-    // If you want `activated_at` to track the most recent activation:
-    if (isActive) {
-      updateQuery += `, activated_at = CURRENT_TIMESTAMP`;
-    }
-
-    updateQuery += ` WHERE id = ? AND user_id = ?`;
-    queryParams.push(id, decoded.userId);
-
-    await db.run(updateQuery, ...queryParams);
 
     try {
       if (isActive) {
-        console.log(`🟢 Activating service ${id} for user ${decoded.userId}`);
+        console.log(
+          `🟢 Activating service ${serviceIdToUpdate} for user ${decoded.userId}`
+        );
         await startUserServices(decoded.userId);
       } else {
-        console.log(`🔴 Deactivating service ${id} for user ${decoded.userId}`);
-        await stopService(decoded.userId, id);
+        console.log(
+          `🔴 Deactivating service ${serviceIdToUpdate} for user ${decoded.userId}`
+        );
+        await stopService(decoded.userId, serviceIdToUpdate);
       }
     } catch (serviceError) {
       console.error("Service control error:", serviceError);
@@ -321,7 +384,7 @@ export async function PUT(request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Update service status error:", error); // Changed error message for clarity
+    console.error("Update service status error:", error);
     return NextResponse.json(
       { success: false, error: "خطا در بروزرسانی وضعیت سرویس" },
       { status: 500 }

@@ -106,43 +106,22 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const { id: userIdToUpdate } = params; // Correctly get userIdToUpdate from params
+    const { id: userIdToUpdate } = params;
     const payload = await request.json();
 
-    // Check if at least one valid field is provided for update
-    const validFields = [
-      "is_premium",
-      "premium_expiry_date",
-      "trial_activated_at",
-    ];
-    const providedFields = Object.keys(payload).filter((key) =>
-      validFields.includes(key)
-    );
-
-    if (providedFields.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "هیچ فیلد معتبری برای به‌روزرسانی ارسال نشده است.",
-        },
-        { status: 400 }
-      );
-    }
-
-    let sql = "UPDATE users SET updated_at = CURRENT_TIMESTAMP";
+    const validFieldsToUpdate = [];
     const queryParams = [];
 
     if (
       payload.hasOwnProperty("is_premium") &&
       typeof payload.is_premium === "boolean"
     ) {
-      sql += ", is_premium = ?";
+      validFieldsToUpdate.push("is_premium = ?");
       queryParams.push(payload.is_premium ? 1 : 0);
     }
 
     if (payload.hasOwnProperty("premium_expiry_date")) {
-      // Allows setting to null
-      sql += ", premium_expiry_date = ?";
+      validFieldsToUpdate.push("premium_expiry_date = ?");
       queryParams.push(
         payload.premium_expiry_date
           ? new Date(payload.premium_expiry_date).toISOString()
@@ -151,8 +130,7 @@ export async function PUT(request, { params }) {
     }
 
     if (payload.hasOwnProperty("trial_activated_at")) {
-      // Allows setting to null
-      sql += ", trial_activated_at = ?";
+      validFieldsToUpdate.push("trial_activated_at = ?");
       queryParams.push(
         payload.trial_activated_at
           ? new Date(payload.trial_activated_at).toISOString()
@@ -160,19 +138,20 @@ export async function PUT(request, { params }) {
       );
     }
 
-    sql += " WHERE id = ?";
-    queryParams.push(userIdToUpdate);
-
-    if (queryParams.length === 1) {
-      // Only userId was added, means no valid fields to update
+    if (validFieldsToUpdate.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          error: "فیلدهای ارسالی برای به‌روزرسانی معتبر نیستند.",
+          error:
+            "هیچ فیلد معتبری برای به‌روزرسانی ارسال نشده است یا مقادیر نامعتبر هستند.",
         },
         { status: 400 }
       );
     }
+
+    const sqlSetStatements = validFieldsToUpdate.join(", ");
+    const sql = `UPDATE users SET updated_at = CURRENT_TIMESTAMP, ${sqlSetStatements} WHERE id = ?`;
+    queryParams.push(userIdToUpdate);
 
     const result = await db.run(sql, ...queryParams);
 
@@ -198,9 +177,9 @@ export async function PUT(request, { params }) {
       },
     });
   } catch (error) {
-    console.error("Admin update user error:", error); // Changed error message
+    console.error("Admin update user error:", error);
     return NextResponse.json(
-      { success: false, error: "خطا در سرور هنگام به‌روزرسانی اطلاعات کاربر." }, // Changed error message
+      { success: false, error: "خطا در سرور هنگام به‌روزرسانی اطلاعات کاربر." },
       { status: 500 }
     );
   }

@@ -8,7 +8,9 @@ const {
   startUserServices,
   stopUserServices,
   initializeAllServices,
+  activeServices: currentlyActiveServicesMap,
 } = require("./services/telegram/service-manager");
+
 const {
   messageMaps,
   saveMessageMap,
@@ -251,70 +253,85 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
-async function checkAndExpireNormalUserServices() {
-  console.log("🕒 Checking for expired normal user services...");
+async function checkAndExpireServices() {
+  console.log("🕒 Checking for expired user accounts and services...");
   try {
     const db = await openDb();
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowISO = now.toISOString();
 
-    // پیدا کردن کاربرانی که ادمین یا پرمیوم نیستند (یا پرمیومشان منقضی شده)
-    const normalUsers = await db.all(
+    // 1. Handle premium users whose subscription expired
+    const expiredPremiumUsers = await db.all(
       `
-      SELECT id FROM users 
-      WHERE is_admin = 0 AND (is_premium = 0 OR premium_expiry_date IS NULL OR premium_expiry_date < ?)
+      SELECT id FROM users
+      WHERE is_premium = 1 AND premium_expiry_date IS NOT NULL AND premium_expiry_date < ?
     `,
-      [now]
+      [nowISO]
     );
 
-    if (!normalUsers.length) {
-      console.log("✅ No normal users found to check for service expiry.");
-      return;
-    }
-
-    const normalUserIds = normalUsers.map((u) => u.id);
-
-    // پیدا کردن سرویس‌های فعال کاربران عادی که service_activated_at دارند و 15 روز از آن گذشته است
-    const servicesToExpire = await db.all(
-      `
-      SELECT id, user_id, name FROM forwarding_services
-      WHERE user_id IN (${normalUserIds.map(() => "?").join(",")})
-        AND is_active = 1
-        AND service_activated_at IS NOT NULL
-        AND DATETIME(service_activated_at, '+15 days') < ?
-    `,
-      [...normalUserIds, now]
-    );
-
-    if (servicesToExpire.length > 0) {
-      console.log(`Found ${servicesToExpire.length} services to expire.`);
-      for (const service of servicesToExpire) {
-        console.log(
-          `⏳ Expiring service ID: ${service.id} for user ID: ${service.user_id}, Name: ${service.name}`
-        );
+    for (const user of expiredPremiumUsers) {
+      console.log(
+        `⏳ Premium expired for user ${user.id}. Deactivating services and reverting to normal user.`
+      );
+      await db.run(
+        "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [user.id]
+      );
+      // Deactivate all their services
+      const userServices = await db.all(
+        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+        [user.id]
+      );
+      for (const service of userServices) {
         await db.run(
           "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [service.id]
         );
-        // مهم: باید سرویس متوقف شود
-        try {
-          await stopService(service.user_id, service.id);
-          // اطلاع رسانی به کاربر (اختیاری)
-          // await sendNotificationToUser(client, `سرویس "${service.name}" شما منقضی و غیرفعال شد.`);
-          console.log(
-            `🔴 Service ${service.id} for user ${service.user_id} deactivated due to expiry.`
-          );
-        } catch (err) {
-          console.error(`Error stopping expired service ${service.id}:`, err);
-        }
+        await stopService(user.id, service.id); // Stop the actual service
+        console.log(
+          `🔴 Service ${service.id} for user ${user.id} deactivated due to premium expiry.`
+        );
       }
-      console.log(
-        `✅ ${servicesToExpire.length} services expired successfully.`
-      );
-    } else {
-      console.log("✅ No normal user services to expire at this time.");
+      // Notify user about premium expiry (optional)
     }
+
+    // 2. Handle normal users whose 15-day trial (based on premium_expiry_date set from trial_activated_at) expired
+    // These are users who are NOT premium, and their premium_expiry_date (acting as account_expiry_date) is past
+    const expiredNormalUsers = await db.all(
+      `
+      SELECT id FROM users
+      WHERE is_admin = 0 AND is_premium = 0 
+        AND trial_activated_at IS NOT NULL 
+        AND premium_expiry_date IS NOT NULL 
+        AND premium_expiry_date < ?
+    `,
+      [nowISO]
+    );
+
+    for (const user of expiredNormalUsers) {
+      console.log(
+        `⏳ Trial period expired for normal user ${user.id}. Deactivating services.`
+      );
+      // Deactivate all their services. They are already not premium.
+      const userServices = await db.all(
+        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+        [user.id]
+      );
+      for (const service of userServices) {
+        await db.run(
+          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [service.id]
+        );
+        await stopService(user.id, service.id); // Stop the actual service
+        console.log(
+          `🔴 Service ${service.id} for user ${user.id} deactivated due to trial expiry.`
+        );
+      }
+      // Notify user about trial expiry (optional)
+    }
+    console.log("✅ Finished checking for expired accounts and services.");
   } catch (error) {
-    console.error("❌ Error in checkAndExpireNormalUserServices:", error);
+    console.error("❌ Error in checkAndExpireServices:", error);
   }
 }
 
@@ -323,8 +340,8 @@ initializeAllServices();
 
 // راه‌اندازی بررسی انقضای سرویس‌ها به صورت دوره‌ای (مثلاً هر ساعت)
 const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 ساعت
-setInterval(checkAndExpireNormalUserServices, EXPIRY_CHECK_INTERVAL);
-checkAndExpireNormalUserServices(); // یکبار هم در ابتدای راه‌اندازی سرور اجرا شود
+setInterval(checkAndExpireServices, EXPIRY_CHECK_INTERVAL);
+checkAndExpireServices(); // Run once on server start
 
 // Start server
 app.listen(PORT, HOST, () => {

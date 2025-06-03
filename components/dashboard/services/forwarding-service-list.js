@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import ForwardingServiceForm from "./forwarding-service-form";
 
-export default function ForwardingServiceList({ onUpdate }) {
+export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingService, setEditingService] = useState(null);
@@ -41,6 +41,15 @@ export default function ForwardingServiceList({ onUpdate }) {
 
   const handleStatusChange = async (id, isActive) => {
     try {
+      if (isActive && userAccountStatus?.isExpired) {
+        toast.error(
+          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی وجود ندارد."
+        );
+        // Optionally, refresh services to reflect any server-side deactivations
+        loadServices();
+        return;
+      }
+
       const result = await ForwardingService.updateServiceStatus(id, isActive);
       if (result.success) {
         setServices(
@@ -53,10 +62,12 @@ export default function ForwardingServiceList({ onUpdate }) {
         );
       } else {
         toast.error(result.error || "خطا در تغییر وضعیت سرویس");
+        loadServices(); // Reload services in case of server-side denial
       }
     } catch (error) {
       console.error("Update service status error:", error);
       toast.error("خطا در تغییر وضعیت سرویس");
+      loadServices(); // Reload services
     }
   };
 
@@ -118,6 +129,7 @@ export default function ForwardingServiceList({ onUpdate }) {
         <ForwardingServiceForm
           service={editingService}
           onSuccess={handleFormSuccess}
+          userAccountStatus={userAccountStatus}
         />
       </div>
     );
@@ -126,7 +138,13 @@ export default function ForwardingServiceList({ onUpdate }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => setShowForm(true)} className="gap-2">
+        <Button
+          onClick={() => setShowForm(true)}
+          className="gap-2"
+          disabled={
+            userAccountStatus?.isExpired && !userAccountStatus?.isPremium
+          } // Disable creating new if normal user trial expired
+        >
           <Plus className="h-4 w-4" />
           ایجاد سرویس جدید
         </Button>
@@ -172,9 +190,13 @@ export default function ForwardingServiceList({ onUpdate }) {
                   </TableCell>
                   <TableCell className="text-right">
                     <Switch
-                      checked={service.is_active}
+                      checked={Boolean(service.is_active)}
                       onCheckedChange={(checked) =>
                         handleStatusChange(service.id, checked)
+                      }
+                      // Disable activation if account is expired, unless it's already active (allowing deactivation)
+                      disabled={
+                        userAccountStatus?.isExpired && !service.is_active
                       }
                     />
                   </TableCell>

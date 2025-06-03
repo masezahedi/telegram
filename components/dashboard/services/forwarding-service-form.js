@@ -58,7 +58,11 @@ const formSchema = z.object({
   copyDirection: z.enum(["before", "after"]).optional(),
 });
 
-export default function ForwardingServiceForm({ service, onSuccess }) {
+export default function ForwardingServiceForm({
+  service,
+  onSuccess,
+  userAccountStatus,
+}) {
   const [loading, setLoading] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [isTelegramConnected, setIsTelegramConnected] = useState(false);
@@ -116,6 +120,13 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
     if (values.useAI && !hasGeminiKey) {
       toast.error(
         "برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات وارد کنید"
+      );
+      return;
+    }
+
+    if (userAccountStatus?.isExpired && !userAccountStatus?.isPremium) {
+      toast.error(
+        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد یا ویرایش کنید."
       );
       return;
     }
@@ -216,6 +227,23 @@ export default function ForwardingServiceForm({ service, onSuccess }) {
       );
     }
   };
+
+  if (
+    userAccountStatus?.isExpired &&
+    !service &&
+    !userAccountStatus?.isPremium
+  ) {
+    // If creating new and normal user trial expired
+    return (
+      <Alert variant="destructive">
+        <Info className="h-4 w-4" />
+        <AlertDescription>
+          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
+          لطفاً اشتراک خود را ارتقا دهید.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   const addTargetChannel = () => {
     const currentChannels = form.getValues("targetChannels");
