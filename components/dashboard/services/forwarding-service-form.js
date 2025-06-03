@@ -355,7 +355,7 @@ export default function ForwardingServiceForm({
               تنظیمات اصلی سرویس
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-6 dir-rtl">
             <FormField
               control={form.control}
               name="name"
