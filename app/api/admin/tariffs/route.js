@@ -1,21 +1,27 @@
 // app/api/admin/tariffs/route.js
 import { NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth"; //
-import { JWT_SECRET } from "@/server/config"; // Import JWT_SECRET from server config
-export const dynamic = "force-dynamic"; //
+import { verifyToken } from "@/lib/auth";
+// The following import is problematic as Next.js API routes do not directly access server/config
+// import { JWT_SECRET } from "@/server/config"; // REMOVE THIS LINE
 
-const EXPRESS_SERVER_BASE_URL = `http://localhost:${process.env.PORT || 3332}`; // Or use the production URL if deployed
+export const dynamic = "force-dynamic";
+
+// Define the base URL for your Express server.
+// It's crucial that this matches where your Express server is actually running.
+// For development, it's typically localhost:3332. For production, it should be the internal IP or service name if in the same network, or the external URL if it's separate.
+// Given your provided logs, the Express server is running on 3332.
+const EXPRESS_SERVER_BASE_URL = `http://localhost:3332`; // Use 0.0.0.0 if in Docker/containerized environment
 
 export async function GET(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1]; //
-    const decoded = await verifyToken(token); //
+    const token = request.headers.get("authorization")?.split(" ")[1];
+    const decoded = await verifyToken(token);
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      ); //
+      );
     }
 
     // Forward the request to the Express server
@@ -35,24 +41,24 @@ export async function GET(request) {
     const data = await expressResponse.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Next.js API (GET /api/admin/tariffs) error:", error); //
+    console.error("Next.js API (GET /api/admin/tariffs) error:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }
-    ); //
+    );
   }
 }
 
 export async function PUT(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1]; //
-    const decoded = await verifyToken(token); //
+    const token = request.headers.get("authorization")?.split(" ")[1];
+    const decoded = await verifyToken(token);
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      ); //
+      );
     }
 
     const requestBody = await request.json();
@@ -75,10 +81,10 @@ export async function PUT(request) {
     const data = await expressResponse.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Next.js API (PUT /api/admin/tariffs) error:", error); //
+    console.error("Next.js API (PUT /api/admin/tariffs) error:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }
-    ); //
+    );
   }
 }
