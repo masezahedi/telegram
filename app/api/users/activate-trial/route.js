@@ -19,7 +19,7 @@ export async function POST(request) {
 
     const db = await openDb();
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, trial_activated_at FROM users WHERE id = ?",
+      "SELECT id, is_admin, is_premium, trial_activated_at, telegram_session FROM users WHERE id = ?", // Add telegram_session check
       [decoded.userId]
     );
 
@@ -42,6 +42,14 @@ export async function POST(request) {
     if (user.trial_activated_at) {
       return NextResponse.json(
         { success: false, error: "دوره آزمایشی قبلاً برای حساب شما فعال شده است." },
+        { status: 400 }
+      );
+    }
+    
+    // Check if telegram is connected
+    if (!user.telegram_session) {
+      return NextResponse.json(
+        { success: false, error: "برای فعال‌سازی دوره آزمایشی، لطفاً ابتدا حساب تلگرام خود را متصل کنید." },
         { status: 400 }
       );
     }
@@ -94,7 +102,7 @@ export async function POST(request) {
           normalUserMaxActiveServices: updatedTariffSettings?.normal_user_max_active_services ?? 1,
           premiumUserMaxActiveServices: updatedTariffSettings?.premium_user_max_active_services ?? 5,
           normalUserMaxChannelsPerService: updatedTariffSettings?.normal_user_max_channels_per_service ?? 1,
-          premiumUserMaxChannelsPerService: updatedTariffSettings?.premium_user_max_channels_per_channels ?? 10,
+          premiumUserMaxChannelsPerService: updatedTariffSettings?.premium_user_max_channels_per_service ?? 10,
         },
       },
     });

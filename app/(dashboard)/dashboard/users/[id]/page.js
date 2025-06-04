@@ -39,8 +39,8 @@ export default function UserDetails({ params }) {
   const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
   const [editIsPremium, setEditIsPremium] = useState(false);
   const [editPremiumExpiryDate, setEditPremiumExpiryDate] = useState("");
-  const [editTrialActivatedAt, setEditTrialActivatedAt] = useState(""); // New state for trial activation
-  const [editServiceCreationCount, setEditServiceCreationCount] = useState(0); // NEW: State for service creation count
+  // const [editTrialActivatedAt, setEditTrialActivatedAt] = useState(""); // Removed
+  // const [editServiceCreationCount, setEditServiceCreationCount] = useState(0); // Removed
   const [isPremiumEditDialogOpen, setIsPremiumEditDialogOpen] = useState(false);
 
   const [editingServiceForDate, setEditingServiceForDate] = useState(null);
@@ -76,14 +76,14 @@ export default function UserDetails({ params }) {
                 .split("T")[0]
             : ""
         );
-        setEditTrialActivatedAt(
-          userDetails.user.trial_activated_at
-            ? new Date(userDetails.user.trial_activated_at)
-                .toISOString()
-                .split("T")[0]
-            : ""
-        );
-        setEditServiceCreationCount(userDetails.user.service_creation_count); // NEW: Initialize service creation count
+        // setEditTrialActivatedAt( // Removed
+        //   userDetails.user.trial_activated_at
+        //     ? new Date(userDetails.user.trial_activated_at)
+        //         .toISOString()
+        //         .split("T")[0]
+        //     : ""
+        // );
+        // setEditServiceCreationCount(userDetails.user.service_creation_count); // Removed
       } else {
         toast.error("کاربر مورد نظر یافت نشد.");
       }
@@ -140,10 +140,10 @@ export default function UserDetails({ params }) {
         premium_expiry_date: editPremiumExpiryDate
           ? new Date(editPremiumExpiryDate).toISOString()
           : null,
-        trial_activated_at: editTrialActivatedAt
-          ? new Date(editTrialActivatedAt).toISOString()
-          : null,
-        service_creation_count: editServiceCreationCount, // NEW: Include service creation count
+        // trial_activated_at: editTrialActivatedAt // Removed
+        //   ? new Date(editTrialActivatedAt).toISOString()
+        //   : null,
+        // service_creation_count: editServiceCreationCount, // Removed
       };
 
       const response = await fetch(`/api/admin/users/${params.id}`, { //
@@ -282,7 +282,7 @@ export default function UserDetails({ params }) {
                 <DialogHeader>
                   <DialogTitle>ویرایش وضعیت اشتراک</DialogTitle>
                   <DialogDescription>
-                    وضعیت پرمیوم، تاریخ انقضا و تاریخ شروع مهلت عادی کاربر «
+                    وضعیت پرمیوم و تاریخ انقضا کاربر «
                     {userData.name}» را تغییر دهید.
                   </DialogDescription>
                 </DialogHeader>
@@ -314,39 +314,8 @@ export default function UserDetails({ params }) {
                       کاربرد دارد. خالی بگذارید برای حذف.
                     </p>
                   </div>
-                  <div>
-                    <Label htmlFor="trial_activated_at_edit">
-                      تاریخ شروع مهلت کاربر عادی
-                    </Label>
-                    <Input
-                      id="trial_activated_at_edit"
-                      type="date"
-                      value={editTrialActivatedAt}
-                      onChange={(e) => setEditTrialActivatedAt(e.target.value)}
-                      className="mt-1"
-                    />
-                    <p className="text-sm text-muted-foreground mt-1">
-                      زمانی که کاربر عادی اولین سرویس را فعال کرده. خالی بگذارید
-                      برای حذف.
-                    </p>
-                  </div>
-                  {/* NEW: Service Creation Count */}
-                  <div>
-                    <Label htmlFor="service_creation_count_edit">
-                      تعداد سرویس ایجاد شده
-                    </Label>
-                    <Input
-                      id="service_creation_count_edit"
-                      type="number"
-                      value={editServiceCreationCount}
-                      onChange={(e) => setEditServiceCreationCount(parseInt(e.target.value, 10))}
-                      className="mt-1"
-                      min="0"
-                    />
-                    <p className="text-sm text-muted-foreground mt-1">
-                      تعداد کل سرویس‌هایی که کاربر ایجاد کرده است.
-                    </p>
-                  </div>
+                  {/* Removed trial_activated_at from admin edit form */}
+                  {/* Removed service_creation_count from admin edit form */}
                   <DialogFooter>
                     <DialogClose asChild>
                       <Button type="button" variant="outline">
@@ -402,8 +371,8 @@ export default function UserDetails({ params }) {
                 <Input value={formattedPremiumExpiry} readOnly />
               </div>
               <div>
-                <Label>تاریخ شروع مهلت عادی</Label>
-                <Input value={formattedTrialActivated} readOnly />
+                <Label>مهلت تست استفاده شده؟</Label> {/* Changed label */}
+                <Input value={userData.trial_activated_at ? "بله" : "خیر"} readOnly /> {/* Display "بله" or "خیر" */}
               </div>
               <div>
                 <Label>تعداد سرویس ایجاد شده</Label>
@@ -459,6 +428,151 @@ export default function UserDetails({ params }) {
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>سرویس‌های کاربر</CardTitle>
+            <CardDescription>
+              لیست تمامی سرویس‌های تعریف شده توسط کاربر
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {userData.services && userData.services.length > 0 ? (
+              <div className="space-y-4">
+                {userData.services.map((service) => {
+                  let serviceStatusMessage = "-";
+                  const serviceActivatedAtFa = service.service_activated_at
+                    ? new Date(service.service_activated_at).toLocaleDateString(
+                        "fa-IR"
+                      )
+                    : "-";
+
+                  // Use tariff settings for trial expiry calculation if available in user object
+                  const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15; //
+
+                  // Logic for service status based on user's overall account status
+                  const now = new Date();
+                  let isUserAccountExpired = false;
+
+                  if (userData.is_premium) {
+                      if (userData.premium_expiry_date && new Date(userData.premium_expiry_date) < now) {
+                          isUserAccountExpired = true;
+                      }
+                  } else { // Normal user
+                      if (userData.trial_activated_at) {
+                          const trialActivatedDate = new Date(userData.trial_activated_at);
+                          const trialExpiryDate = new Date(trialActivatedDate);
+                          trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+                          if (now >= trialExpiryDate) {
+                              isUserAccountExpired = true;
+                          }
+                      } else {
+                          // Trial not activated means user cannot have active services unless they are premium.
+                          isUserAccountExpired = true; // Effectively expired for service activation
+                      }
+                  }
+
+                  if (isUserAccountExpired) {
+                      serviceStatusMessage = "منقضی شده (حساب کاربری)";
+                  } else if (userData.is_premium) {
+                      serviceStatusMessage = "فعال (پرمیوم)";
+                  } else if (userData.trial_activated_at) {
+                      const trialActivatedDate = new Date(userData.trial_activated_at);
+                      const trialExpiryDate = new Date(trialActivatedDate);
+                      trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+                      serviceStatusMessage = `فعال (تا ${trialExpiryDate.toLocaleDateString("fa-IR")})`;
+                  } else {
+                    serviceStatusMessage = "غیرفعال (نیاز به فعال‌سازی تریال)";
+                  }
+
+
+                  return (
+                    <Card key={service.id}>
+                      <CardHeader className="flex flex-row justify-between items-start">
+                        <div>
+                          <h3 className="text-lg font-semibold">
+                            {service.name}
+                          </h3>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs ${
+                              service.is_active
+                                ? "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-400"
+                                : "bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-400"
+                            }`}
+                          >
+                            {service.is_active ? "فعال" : "غیرفعال"}
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditServiceDateDialog(service)}
+                        >
+                          <CalendarClock className="ml-2 h-4 w-4" /> ویرایش
+                          تاریخ اولین فعالیت
+                        </Button>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <div className="space-y-1">
+                          <p className="text-sm text-muted-foreground">
+                            نوع:{" "}
+                            {service.type === "copy"
+                              ? "کپی کانال"
+                              : "فوروارد خودکار"}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            تاریخ اولین فعال‌سازی: {serviceActivatedAtFa}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            وضعیت مهلت: {serviceStatusMessage}
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 mt-2">
+                            <div>
+                              <Label className="text-xs text-muted-foreground">
+                                مبدا:
+                              </Label>
+                              <div className="text-sm">
+                                {Array.isArray(service.source_channels)
+                                  ? service.source_channels.join(", ")
+                                  : service.source_channels || ""}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-xs text-muted-foreground">
+                                مقصد:
+                              </Label>
+                              <div className="text-sm">
+                                {Array.isArray(service.target_channels)
+                                  ? service.target_channels.join(", ")
+                                  : service.target_channels || ""}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Display Search & Replace Rules */}
+                          {service.search_replace_rules && service.search_replace_rules.length > 0 && (
+                            <div className="mt-2">
+                              <Label className="text-xs text-muted-foreground">قوانین جستجو/جایگزینی:</Label>
+                              <ul className="text-sm list-disc list-inside">
+                                {service.search_replace_rules.map((rule, i) => (
+                                  <li key={i}>{`"${rule.search || ""}" جایگزین با "${rule.replace || ""}"`}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {/* ... other service details ... */}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                هیچ سرویسی برای این کاربر یافت نشد.
+              </div>
+            )}
           </CardContent>
         </Card>
 

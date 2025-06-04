@@ -931,6 +931,81 @@ export default function ForwardingServiceForm({
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-x-2">
+              <MessageSquareText className="h-5 w-5 text-primary" />
+              جایگزینی متن
+            </CardTitle>
+            <CardDesc>قوانین جستجو و جایگزینی عبارات در متن پیام‌ها.</CardDesc>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {ruleFields.map((item, index) => (
+              <div
+                key={item.id}
+                className="flex items-end gap-x-2 p-3 border rounded-md bg-muted/20"
+              >
+                <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.search`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جستجو</FormLabel>
+                        <FormControl>
+                          <Input
+                            dir="rtl"
+                            placeholder="عبارتی که می‌خواهید پیدا شود"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`searchReplaceRules.${index}.replace`}
+                    render={({ field: controlledField }) => (
+                      <FormItem>
+                        <FormLabel>متن جایگزین</FormLabel>
+                        <FormControl>
+                          <Input
+                            dir="rtl"
+                            placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
+                            {...controlledField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeRule(index)}
+                  className="text-destructive hover:text-destructive/80 shrink-0"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="sr-only">حذف قانون</span>
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => appendRule({ search: "", replace: "" })}
+              className="w-full gap-x-1"
+            >
+              <Plus className="h-4 w-4" />
+              افزودن قانون جدید
+            </Button>
+          </CardContent>
+        </Card>
+
         <div className="flex justify-start pt-4">
           <Button
             type="submit"

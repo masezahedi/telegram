@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth"; //
 import { openDb } from "@/lib/db"; //
+import { startUserServices } from "@/server/services/telegram/service-manager"; // Import to restart services
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function GET(request, { params }) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      ); //
+      );
     }
 
     const db = await openDb(); //
@@ -47,7 +48,7 @@ export async function GET(request, { params }) {
 
     if (!user) {
       return NextResponse.json(
-        { success: false, error: "User not found" },
+        { success: false, error: "کاربر یافت نشد" },
         { status: 404 }
       );
     }
@@ -67,14 +68,14 @@ export async function GET(request, { params }) {
         is_premium: Boolean(user.is_premium), //
         services: services.map((s) => ({ //
           ...s,
-          source_channels: JSON.parse(s.source_channels || "[]"), //
-          target_channels: JSON.parse(s.target_channels || "[]"), //
-          search_replace_rules: JSON.parse(s.search_replace_rules || "[]"), //
+          source_channels: JSON.parse(s.source_channels || "[]"),
+          target_channels: JSON.parse(s.target_channels || "[]"),
+          search_replace_rules: JSON.parse(s.search_replace_rules || "[]"),
         })),
       },
     });
   } catch (error) {
-    console.error("Get user details error:", error); //
+    console.error("Get user details error:", error);
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }
@@ -112,6 +113,7 @@ export async function PUT(request, { params }) {
     const validFieldsToUpdate = [];
     const queryParams = [];
 
+    // Allow changing is_premium
     if (
       payload.hasOwnProperty("is_premium") &&
       typeof payload.is_premium === "boolean"
@@ -120,6 +122,7 @@ export async function PUT(request, { params }) {
       queryParams.push(payload.is_premium ? 1 : 0);
     }
 
+    // Allow changing premium_expiry_date (main expiry date for both premium and trial)
     if (payload.hasOwnProperty("premium_expiry_date")) {
       validFieldsToUpdate.push("premium_expiry_date = ?");
       queryParams.push(
@@ -129,19 +132,13 @@ export async function PUT(request, { params }) {
       );
     }
 
-    if (payload.hasOwnProperty("trial_activated_at")) {
+    // NEW LOGIC: If is_premium is set to false AND trial_activated_at exists,
+    // ensure premium_expiry_date is set based on trial if not explicitly set.
+    // However, for admin panel, we assume premium_expiry_date directly controls expiry.
+    // If setting is_premium to false, trial_activated_at should probably be cleared too.
+    if (payload.hasOwnProperty("is_premium") && payload.is_premium === false) {
       validFieldsToUpdate.push("trial_activated_at = ?");
-      queryParams.push(
-        payload.trial_activated_at
-          ? new Date(payload.trial_activated_at).toISOString()
-          : null
-      );
-    }
-
-    // Add service_creation_count to updatable fields for admin
-    if (payload.hasOwnProperty("service_creation_count") && typeof payload.service_creation_count === "number" && payload.service_creation_count >= 0) {
-      validFieldsToUpdate.push("service_creation_count = ?");
-      queryParams.push(payload.service_creation_count);
+      queryParams.push(null); // Clear trial_activated_at if user is no longer premium
     }
 
 
@@ -169,10 +166,40 @@ export async function PUT(request, { params }) {
       );
     }
 
+    // NEW LOGIC: After update, re-evaluate user services.
+    // If the expiry date is now in the past, services should be stopped.
+    // This is crucial for immediate effect of admin changes.
     const updatedUser = await db.get(
-      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at, service_creation_count FROM users WHERE id = ?", //
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
       [userIdToUpdate]
     );
+
+    const now = new Date();
+    let shouldStopServices = false;
+    if (!updatedUser.is_admin) {
+        if (updatedUser.is_premium && updatedUser.premium_expiry_date && new Date(updatedUser.premium_expiry_date) < now) {
+            shouldStopServices = true; // Premium expired
+        } else if (!updatedUser.is_premium && updatedUser.trial_activated_at) {
+            const tariffSettings = await db.get("SELECT normal_user_trial_days FROM tariff_settings LIMIT 1"); //
+            const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
+            const trialExpiryDate = new Date(updatedUser.trial_activated_at);
+            trialExpiryDate.setDate(trialExpiryDate.getDate() + normalUserTrialDays);
+            if (now >= trialExpiryDate) {
+                shouldStopServices = true; // Trial expired
+            }
+        } else if (!updatedUser.is_premium && !updatedUser.trial_activated_at) {
+            shouldStopServices = true; // Neither premium nor trial active (e.g., admin removed premium and trial_activated_at)
+        }
+    }
+
+    if (shouldStopServices) {
+        console.log(`User ${userIdToUpdate} account now expired due to admin action. Stopping services.`);
+        await startUserServices(userIdToUpdate); // This will handle stopping services if expired
+    } else {
+        console.log(`User ${userIdToUpdate} account status updated. Re-evaluating services.`);
+        await startUserServices(userIdToUpdate); // Re-evaluate to potentially start services if activated
+    }
+
 
     return NextResponse.json({
       success: true,
