@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { openDb } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
+import { NextResponse } = require("next/server");
+import { openDb } = require("@/lib/db");
+import { verifyToken } = require("@/lib/auth");
 export const dynamic = "force-dynamic";
 
 export async function POST(request) {
@@ -14,9 +14,10 @@ export async function POST(request) {
       );
     }
 
-    const { telegramSession, phoneNumber } = await request.json();
+    // Changed telegramSession to telegram_session to match frontend
+    const { telegram_session, phoneNumber } = await request.json();
 
-    if (!telegramSession) {
+    if (!telegram_session) { // Check for telegram_session instead of telegramSession
       return NextResponse.json(
         { success: false, error: "اطلاعات ناقص است" },
         { status: 400 }
@@ -28,7 +29,7 @@ export async function POST(request) {
     // Update user's Telegram session
     await db.run(
       "UPDATE users SET telegram_session = ?, phone_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [telegramSession, phoneNumber || null, decoded.userId]
+      [telegram_session, phoneNumber || null, decoded.userId]
     );
 
     // Get updated user data
@@ -43,12 +44,12 @@ export async function POST(request) {
       );
     }
 
-    // Update local storage with new user data
+    // Return updated user data (ensure consistent casing for frontend usage)
     const userData = {
       id: updatedUser.id,
       name: updatedUser.name,
       email: updatedUser.email,
-      telegramSession: updatedUser.telegram_session,
+      telegram_session: updatedUser.telegram_session, // Keep consistent snake_case
       phoneNumber: updatedUser.phone_number,
     };
 
@@ -104,7 +105,7 @@ export async function DELETE(request) {
       id: updatedUser.id,
       name: updatedUser.name,
       email: updatedUser.email,
-      telegramSession: null,
+      telegram_session: null, // Keep consistent snake_case
       phoneNumber: null,
     };
 
