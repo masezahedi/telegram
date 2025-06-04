@@ -27,25 +27,20 @@ export default function Services() {
   const [key, setKey] = useState(0); // For re-rendering list/form if user status changes
 
   const fetchUserAndSetState = async () => {
-    const storedUser = AuthService.getStoredUser(); //
-    if (storedUser) {
-      setUser(storedUser);
+    // Always fetch fresh user data to ensure up-to-date status
+    const freshUser = await UserService.getCurrentUser(); //
+    if (freshUser?.user) { // getCurrentUser returns { user: ... }
+      // Update local storage with fresh data, including tariff settings
+      localStorage.setItem("user", JSON.stringify({ //
+        ...freshUser.user,
+        isTelegramConnected: Boolean(freshUser.user.telegramSession), //
+        isAdmin: Boolean(freshUser.user.isAdmin),
+        isPremium: Boolean(freshUser.user.isPremium),
+      }));
+      setUser(freshUser.user);
     } else {
-      // Fallback or if localStorage is cleared/stale
-      const freshUser = await UserService.getCurrentUser(); // Assuming UserService exists and fetches fresh data //
-      if (freshUser?.user) { // getCurrentUser returns { user: ... }
-        // Update local storage with fresh data, including tariff settings
-        localStorage.setItem("user", JSON.stringify({ //
-          ...freshUser.user,
-          isTelegramConnected: Boolean(freshUser.user.telegramSession),
-          isAdmin: Boolean(freshUser.user.isAdmin),
-          isPremium: Boolean(freshUser.user.isPremium),
-        }));
-        setUser(freshUser.user); // Get the updated user object from local storage
-      } else {
-        toast.error("خطا در دریافت اطلاعات کاربر.");
-        router.replace("/login");
-      }
+      toast.error("خطا در دریافت اطلاعات کاربر.");
+      router.replace("/login");
     }
   };
 
@@ -87,7 +82,7 @@ export default function Services() {
   const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15; //
 
   // NEW: Add a flag for trial activation status
-  let isTrialActivated = Boolean(user?.trialActivatedAt);
+  let isTrialActivated = Boolean(user?.trialActivatedAt); //
 
 
   if (user && !user.isAdmin) {
@@ -114,7 +109,7 @@ export default function Services() {
       }
     } else {
       // Normal user
-      if (isTrialActivated) {
+      if (isTrialActivated) { //
         const trialActivatedDate = new Date(user.trialActivatedAt);
         const trialExpiry = new Date(trialActivatedDate);
         trialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays); // Use dynamic trial days
@@ -135,7 +130,7 @@ export default function Services() {
         }
       } else {
         accountStatusMessage =
-          `شما کاربر عادی هستید. با فعال‌سازی اولین سرویس، مهلت ${normalUserTrialDays} روزه شما آغاز می‌شود.`;
+          `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
         alertVariant = "default";
       }
     }
@@ -202,6 +197,7 @@ export default function Services() {
                     isAdmin: user?.isAdmin,
                     trialActivated: isTrialActivated, // NEW: Pass trial activation status
                     normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
+                    isTelegramConnected: user?.isTelegramConnected, // NEW: Pass Telegram connection status
                     normalUserMaxActiveServices: user?.tariffSettings?.normalUserMaxActiveServices, //
                     premiumUserMaxActiveServices: user?.tariffSettings?.premiumUserMaxActiveServices, //
                   }}
@@ -217,6 +213,7 @@ export default function Services() {
                     isAdmin: user?.isAdmin,
                     trialActivated: isTrialActivated, // NEW: Pass trial activation status
                     normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
+                    isTelegramConnected: user?.isTelegramConnected, // NEW: Pass Telegram connection status
                     // Pass tariff settings to form for client-side validation messages if needed
                     normalUserMaxChannelsPerService: user?.tariffSettings?.normalUserMaxChannelsPerService, //
                     premiumUserMaxChannelsPerService: user?.tariffSettings?.premiumUserMaxChannelsPerService, //

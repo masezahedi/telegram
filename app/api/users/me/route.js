@@ -1,12 +1,13 @@
+// app/api/users/me/route.js
 import { NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
-import { openDb } from "@/lib/db";
+import { verifyToken } from "@/lib/auth"; //
+import { openDb } from "@/lib/db"; //
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
@@ -15,11 +16,11 @@ export async function GET(request) {
       );
     }
 
-    const db = await openDb();
+    const db = await openDb(); //
     const user = await db.get(
       `SELECT id, name, email, telegram_session, phone_number, is_admin, 
               is_premium, premium_expiry_date, trial_activated_at, service_creation_count
-       FROM users WHERE id = ?`,
+       FROM users WHERE id = ?`, //
       [decoded.userId]
     );
 
@@ -31,7 +32,7 @@ export async function GET(request) {
     }
 
     // Fetch tariff settings for the user's dashboard logic
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
 
 
     return NextResponse.json({
@@ -47,6 +48,7 @@ export async function GET(request) {
         premiumExpiryDate: user.premium_expiry_date, // Represents overall account expiry
         trialActivatedAt: user.trial_activated_at, // New
         serviceCreationCount: user.service_creation_count,
+        isTelegramConnected: Boolean(user.telegram_session), // Ensure this is explicitly passed
         // Include tariff settings
         tariffSettings: {
           normalUserTrialDays: tariffSettings?.normal_user_trial_days ?? 15,

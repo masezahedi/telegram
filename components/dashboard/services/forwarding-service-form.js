@@ -40,9 +40,9 @@ import {
 } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ForwardingService } from "@/lib/services/forwarding-service";
-import { AuthService } from "@/lib/services/auth-service";
-import { SettingsService } from "@/lib/services/settings-service";
+import { ForwardingService } from "@/lib/services/forwarding-service"; //
+import { AuthService } from "@/lib/services/auth-service"; //
+import { SettingsService } from "@/lib/services/settings-service"; //
 import {
   Card,
   CardContent,
@@ -120,11 +120,13 @@ export default function ForwardingServiceForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
-  const [isTelegramConnected, setIsTelegramConnected] = useState(false);
+  // const [isTelegramConnected, setIsTelegramConnected] = useState(false); // No longer needed here, use userAccountStatus
 
   // Extract tariff settings from userAccountStatus
   const normalUserMaxChannelsPerService = userAccountStatus?.normalUserMaxChannelsPerService ?? 1; //
   const premiumUserMaxChannelsPerService = userAccountStatus?.premiumUserMaxChannelsPerService ?? 10; //
+  const normalUserTrialDays = userAccountStatus?.normalUserTrialDays ?? 15; //
+
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -190,8 +192,6 @@ export default function ForwardingServiceForm({
 
   useEffect(() => {
     const checkRequirements = async () => {
-      const user = AuthService.getStoredUser(); //
-      setIsTelegramConnected(Boolean(user?.isTelegramConnected));
       const settings = await SettingsService.getSettings(); //
       setHasGeminiKey(Boolean(settings?.gemini_api_key));
     };
@@ -230,10 +230,12 @@ export default function ForwardingServiceForm({
   ]); // Added sourceFields.length and targetFields.length
 
   const onSubmit = async (values) => {
-    if (!isTelegramConnected) {
-      toast.error("لطفاً ابتدا به تلگرام متصل شوید");
+    // NEW LOGIC: Check Telegram connection
+    if (!userAccountStatus?.isTelegramConnected) {
+      toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
       return;
     }
+
     if (values.useAI && !hasGeminiKey) {
       toast.error(
         "برای استفاده از هوش مصنوعی، لطفاً کلید API جیمنای را در تنظیمات وارد کنید"
@@ -254,12 +256,13 @@ export default function ForwardingServiceForm({
       return;
     }
     if (
+      isNewService && // Only for new services
       !userAccountStatus?.isAdmin && // Not an admin
       !userAccountStatus?.isPremium && // Not premium
       !userAccountStatus?.trialActivated // Trial not yet activated
     ) {
       toast.error(
-        `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${userAccountStatus.normalUserTrialDays} روزه" در بخش "لیست سرویس‌ها" کلیک کنید.`
+        `لطفاً برای شروع ایجاد سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید. (در بخش لیست سرویس‌ها)`
       );
       return;
     }
@@ -397,11 +400,12 @@ export default function ForwardingServiceForm({
       : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
 
 
-  if (!isTelegramConnected) {
+  // NEW LOGIC: Conditional rendering based on Telegram connection and trial status
+  if (!userAccountStatus?.isTelegramConnected) {
     return (
       <div className="text-center py-8">
         <p className="text-destructive mb-4">
-          برای ایجاد سرویس، ابتدا باید به تلگرام متصل شوید
+          برای ایجاد و مدیریت سرویس‌ها، ابتدا باید به تلگرام متصل شوید.
         </p>
         <Button
           variant="outline"
@@ -442,7 +446,7 @@ export default function ForwardingServiceForm({
         <Info className="h-4 w-4" />
         <AlertTitle>فعال‌سازی مهلت آزمایشی</AlertTitle>
         <AlertDescription>
-          برای شروع ایجاد سرویس، ابتدا باید مهلت {userAccountStatus.normalUserTrialDays} روزه آزمایشی خود را فعال کنید. لطفاً به بخش "لیست سرویس‌ها" مراجعه کرده و روی دکمه "فعال‌سازی مهلت آزمایشی" کلیک کنید.
+          برای شروع ایجاد سرویس، ابتدا باید مهلت {normalUserTrialDays} روزه آزمایشی خود را فعال کنید. لطفاً به بخش "لیست سرویس‌ها" مراجعه کرده و روی دکمه "فعال‌سازی مهلت آزمایشی" کلیک کنید.
         </AlertDescription>
       </Alert>
     );

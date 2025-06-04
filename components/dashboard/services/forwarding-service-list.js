@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react"; // Eye removed as it wasn't used
 import {
   Table,
   TableBody,
@@ -16,7 +16,7 @@ import {
   TableCaption,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ForwardingService } from "@/lib/services/forwarding-service";
+import { ForwardingService } from "@/lib/services/forwarding-service"; //
 import ForwardingServiceForm from "./forwarding-service-form";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -25,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { UserService } from "@/lib/services/user-service"; // Import UserService for activateTrial
 
 export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [services, setServices] = useState([]);
@@ -33,9 +34,9 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [showForm, setShowForm] = useState(false);
 
   // Extract tariff settings from userAccountStatus
-  const normalUserTrialDays = userAccountStatus?.normalUserTrialDays ?? 15;
-  const normalUserMaxActiveServices = userAccountStatus?.normalUserMaxActiveServices ?? 1;
-  const premiumUserMaxActiveServices = userAccountStatus?.premiumUserMaxActiveServices ?? 5;
+  const normalUserTrialDays = userAccountStatus?.normalUserTrialDays ?? 15; //
+  const normalUserMaxActiveServices = userAccountStatus?.normalUserMaxActiveServices ?? 1; //
+  const premiumUserMaxActiveServices = userAccountStatus?.premiumUserMaxActiveServices ?? 5; //
 
 
   const loadServices = async () => {
@@ -56,8 +57,13 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   }, []);
 
   const handleStatusChange = async (id, newIsActiveStatus) => {
-    // NEW LOGIC: Block activation if account is expired or trial not activated
+    // NEW LOGIC: Block activation if account is expired or trial not activated or telegram not connected
     if (newIsActiveStatus) { // Only check when trying to ACTIVATE a service
+      if (!userAccountStatus?.isTelegramConnected) { //
+        toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
+        await loadServices();
+        return;
+      }
       if (!userAccountStatus?.isAdmin) { // Admins bypass these checks
         if (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) {
           toast.error(
@@ -139,7 +145,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   };
 
   const handleEdit = (service) => {
-    // NEW LOGIC: Block editing if account is expired and not premium/admin
+    // NEW LOGIC: Block editing if account is expired and not premium/admin or trial not activated
     if (
       userAccountStatus?.isExpired &&
       !userAccountStatus?.isPremium &&
@@ -150,7 +156,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       );
       return;
     }
-    // NEW LOGIC: Block editing if trial not activated
     if (
       !userAccountStatus?.isAdmin &&
       !userAccountStatus?.isPremium &&
@@ -177,28 +182,12 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const handleActivateTrial = async () => {
     setLoading(true);
     try {
-      // Find the first inactive service, or create a dummy one if none exists, to trigger trial
-      const serviceToActivate = services.find(s => !s.is_active);
-      if (serviceToActivate) {
-        // Activate an existing inactive service to trigger trial
-        await handleStatusChange(serviceToActivate.id, true);
+      const result = await UserService.activateTrial(); //
+      if (result.success) {
+        toast.success(result.message);
+        onUpdate?.(); // Trigger user state update in parent
       } else {
-        // If no inactive service, create a dummy one to trigger trial activation
-        // This is a workaround to trigger the backend trial activation logic
-        const dummyServiceData = {
-          name: "سرویس آزمایشی (جهت فعالسازی تریال)",
-          type: "forward",
-          sourceChannels: ["@testchannel"], // Dummy channel, replace with something meaningful if possible
-          targetChannels: ["@mychannel"],    // Dummy channel
-          is_active: true,
-        };
-        const result = await ForwardingService.createService(dummyServiceData); //
-        if (result.success) {
-          toast.success(`مهلت ${normalUserTrialDays} روزه آزمایشی شما فعال شد!`);
-          onUpdate?.(); // Trigger user state update
-        } else {
-          toast.error(result.error || "خطا در فعال‌سازی مهلت آزمایشی.");
-        }
+        toast.error(result.error || "خطا در فعال‌سازی مهلت آزمایشی.");
       }
     } catch (error) {
       console.error("Error activating trial:", error);
@@ -248,14 +237,17 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     !userAccountStatus?.isAdmin && // Not an admin
     (
       (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) || // Not premium AND trial expired
-      (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) // Not premium AND trial not activated
+      (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) || // Not premium AND trial not activated
+      !userAccountStatus?.isTelegramConnected // Not telegram connected
     );
 
   // Determine if trial activation button should be shown
   const showTrialActivationButton =
     !userAccountStatus?.isAdmin &&
     !userAccountStatus?.isPremium &&
-    !userAccountStatus?.trialActivated; // Only show if normal user and trial hasn't started
+    !userAccountStatus?.trialActivated && // Only show if normal user and trial hasn't started
+    userAccountStatus?.isTelegramConnected; // Only show if telegram is connected
+
 
   // Determine if switch should be disabled for limit reasons
   const disableSwitchDueToLimits = (serviceStatus) => {
@@ -304,7 +296,10 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
             <Info className="h-4 w-4" />
             <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
             <AlertDescription>
-              امکان ایجاد سرویس جدید وجود ندارد. لطفاً ابتدا مهلت آزمایشی خود را فعال کنید یا اشتراک خود را ارتقا دهید.
+              امکان ایجاد سرویس جدید وجود ندارد. لطفاً{" "}
+              {!userAccountStatus?.isTelegramConnected ? "ابتدا تلگرام خود را متصل کنید،" : ""}
+              {(!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) ? " مهلت آزمایشی خود را فعال کنید" : ""}
+              {(!userAccountStatus?.isPremium && userAccountStatus?.isExpired) ? " یا اشتراک خود را ارتقا دهید." : ""}
             </AlertDescription>
           </Alert>
         )}
@@ -406,6 +401,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                         // 1. Account is expired AND not premium AND not admin (unless service is already active)
                         // 2. Account is not premium AND trial not activated (unless service is already active)
                         // 3. Max active services limit reached for current user type
+                        // 4. Telegram is not connected
                         disabled={
                           (userAccountStatus?.isExpired &&
                           !userAccountStatus?.isPremium &&
@@ -415,7 +411,8 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                           !userAccountStatus?.isPremium &&
                           !userAccountStatus?.trialActivated &&
                           !service.is_active) ||
-                          disableSwitchDueToLimits(service)
+                          disableSwitchDueToLimits(service) ||
+                          !userAccountStatus?.isTelegramConnected //
                         }
                         aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
                         dir="ltr"
@@ -432,13 +429,15 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                               // Disable if:
                               // 1. Account is expired AND not premium AND not admin
                               // 2. Account is not premium AND trial not activated
+                              // 3. Telegram is not connected
                               disabled={
                                 (userAccountStatus?.isExpired &&
                                 !userAccountStatus?.isPremium &&
                                 !userAccountStatus?.isAdmin) ||
                                 (!userAccountStatus?.isAdmin &&
                                 !userAccountStatus?.isPremium &&
-                                !userAccountStatus?.trialActivated)
+                                !userAccountStatus?.trialActivated) ||
+                                !userAccountStatus?.isTelegramConnected //
                               }
                             >
                               <Pencil className="h-4 w-4" />

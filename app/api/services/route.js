@@ -1,7 +1,7 @@
 // app/api/services/route.js
 import { NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
-import { openDb } from "@/lib/db";
+import { verifyToken } from "@/lib/auth"; //
+import { openDb } from "@/lib/db"; //
 import {
   stopService,
   startUserServices,
@@ -90,7 +90,7 @@ export async function POST(request) {
 
     const db = await openDb(); //
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at, telegram_session FROM users WHERE id = ?", //
       [decoded.userId]
     );
 
@@ -98,6 +98,14 @@ export async function POST(request) {
       return NextResponse.json(
         { success: false, error: "کاربر یافت نشد" },
         { status: 404 }
+      );
+    }
+
+    // NEW LOGIC: Check if Telegram is connected before allowing service creation
+    if (!user.telegram_session) {
+      return NextResponse.json(
+        { success: false, error: "لطفاً ابتدا حساب تلگرام خود را متصل کنید." },
+        { status: 403 }
       );
     }
 
@@ -123,6 +131,8 @@ export async function POST(request) {
     // Fetch tariff settings
     const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
     const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1; //
+    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10; //
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
 
     // --- Start of Limit Checks for Creating Service ---
     if (!user.is_admin) {
@@ -144,6 +154,17 @@ export async function POST(request) {
         );
       }
 
+      // NEW LOGIC: Prevent service creation if normal user and trial NOT activated yet
+      if (!user.is_premium && !user.trial_activated_at) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `لطفاً ابتدا مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`,
+          },
+          { status: 403 }
+        );
+      }
+
       // Tier-based limits on channel count (only normal user has a limit here for channel count)
       if (
         !user.is_premium && // فقط برای کاربر عادی این محدودیت اعمال می‌شود
@@ -154,6 +175,18 @@ export async function POST(request) {
           {
             success: false,
             error: `کاربران عادی فقط می‌توانند ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
+          },
+          { status: 403 }
+        );
+      } else if ( // Premium user channel limit
+        user.is_premium &&
+        (sourceChannels.filter(Boolean).length > premiumUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length > premiumUserMaxChannelsPerService)
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `کاربران پرمیوم حداکثر می‌توانند ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
           },
           { status: 403 }
         );
@@ -189,27 +222,8 @@ export async function POST(request) {
       ]
     );
 
-    // After successfully creating a service, if it's a normal user and trial hasn't started, initiate trial
-    if (
-      !user.is_admin &&
-      !user.is_premium &&
-      !user.trial_activated_at
-    ) {
-      const trialStart = new Date();
-      const trialEnd = new Date(trialStart);
-      trialEnd.setDate(trialStart.getDate() + (tariffSettings?.normal_user_trial_days ?? 15)); //
-
-      await db.run(
-        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
-        [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
-      );
-      console.log(
-        `Normal user ${
-          decoded.userId
-        } trial started. Expires: ${trialEnd.toISOString()}. Trial activated at: ${trialStart.toISOString()}`
-      );
-    }
-
+    // Trial activation moved to a separate API /api/users/activate-trial
+    // No automatic trial activation here.
 
     return NextResponse.json({ success: true, serviceId: serviceId });
   } catch (error) {
@@ -236,7 +250,7 @@ export async function PUT(request) {
     const { id: serviceIdToUpdate, isActive } = await request.json();
     const db = await openDb(); //
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at, telegram_session FROM users WHERE id = ?", //
       [decoded.userId]
     );
 
@@ -244,6 +258,14 @@ export async function PUT(request) {
       return NextResponse.json(
         { success: false, error: "کاربر یافت نشد" },
         { status: 404 }
+      );
+    }
+
+    // NEW LOGIC: Check if Telegram is connected before allowing service activation
+    if (!user.telegram_session && isActive) {
+      return NextResponse.json(
+        { success: false, error: "لطفاً ابتدا حساب تلگرام خود را متصل کنید." },
+        { status: 403 }
       );
     }
 
@@ -269,6 +291,8 @@ export async function PUT(request) {
     const premiumUserMaxActiveServices = tariffSettings?.premium_user_max_active_services ?? 5; //
     const normalUserMaxActiveServices = tariffSettings?.normal_user_max_active_services ?? 1; //
     const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1; //
+    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10; //
+
 
     if (user.is_admin) {
       userIsEffectivelyPremium = true; // Admins have no restrictions
@@ -290,9 +314,18 @@ export async function PUT(request) {
       effectiveAccountExpiryDate = calculatedTrialExpiry;
       userIsEffectivelyPremium = false;
     } else if (!user.is_premium && !user.trial_activated_at) {
-      // Normal user, trial not yet started. They can activate one service to start trial.
-      // In this specific case, we'll allow activation to start the trial, and the logic below will set trial_activated_at.
-      userIsEffectivelyPremium = false;
+      // Normal user, trial not yet started.
+      // They CANNOT activate services directly from here.
+      // Trial must be activated via the dedicated button.
+      if (isActive) { // If trying to activate
+        return NextResponse.json(
+          {
+            success: false,
+            error: `لطفاً ابتدا مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`,
+          },
+          { status: 403 }
+        );
+      }
     }
 
 
@@ -386,14 +419,13 @@ export async function PUT(request) {
       }
     }
 
-
     let updateServiceSQL = `UPDATE forwarding_services SET is_active = ?, updated_at = CURRENT_TIMESTAMP`;
     const updateServiceParams = [isActive ? 1 : 0];
 
-    if (isActive && !serviceToUpdate.service_activated_at) {
-      // Set on first activation of THIS service
-      updateServiceSQL += `, service_activated_at = CURRENT_TIMESTAMP`;
-    }
+    // service_activated_at is now handled by admin, not on first service activation by user
+    // if (isActive && !serviceToUpdate.service_activated_at) {
+    //   updateServiceSQL += `, service_activated_at = CURRENT_TIMESTAMP`;
+    // }
     if (isActive) {
       // Always update last general activation time
       updateServiceSQL += `, activated_at = CURRENT_TIMESTAMP`;
@@ -403,28 +435,25 @@ export async function PUT(request) {
     updateServiceParams.push(serviceIdToUpdate, decoded.userId);
     await db.run(updateServiceSQL, ...updateServiceParams);
 
-    // Set user's trial_activated_at and calculate premium_expiry_date (for normal user's trial)
-    // This happens when a normal user activates *any* service for the *very first time*
-    if (
-      isActive &&
-      !user.is_admin &&
-      !user.is_premium &&
-      !user.trial_activated_at
-    ) {
-      const trialStart = new Date();
-      const trialEnd = new Date(trialStart);
-      trialEnd.setDate(trialStart.getDate() + normalUserTrialDays); //
+    // Trial activation moved to a separate API and button click
+    // if (
+    //   isActive &&
+    //   !user.is_admin &&
+    //   !user.is_premium &&
+    //   !user.trial_activated_at
+    // ) {
+    //   const trialStart = new Date();
+    //   const trialEnd = new Date(trialStart);
+    //   trialEnd.setDate(trialStart.getDate() + normalUserTrialDays);
 
-      await db.run(
-        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
-        [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
-      );
-      console.log(
-        `Normal user ${
-          decoded.userId
-        } trial started. Expires: ${trialEnd.toISOString()}. Trial activated at: ${trialStart.toISOString()}`
-      );
-    }
+    //   await db.run(
+    //     "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    //     [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
+    //   );
+    //   console.log(
+    //     `Normal user ${decoded.userId} trial started. Expires: ${trialEnd.toISOString()}. Trial activated at: ${trialStart.toISOString()}`
+    //   );
+    // }
 
     try {
       if (isActive) {
