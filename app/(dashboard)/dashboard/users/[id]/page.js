@@ -4,8 +4,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AuthService } from "@/lib/services/auth-service"; //
-import { UserService } from "@/lib/services/user-service"; //
+import { AuthService } from "@/lib/services/auth-service";
+import { UserService } from "@/lib/services/user-service";
 import {
   Card,
   CardContent,
@@ -39,8 +39,6 @@ export default function UserDetails({ params }) {
   const [isSubmittingPremium, setIsSubmittingPremium] = useState(false);
   const [editIsPremium, setEditIsPremium] = useState(false);
   const [editPremiumExpiryDate, setEditPremiumExpiryDate] = useState("");
-  // const [editTrialActivatedAt, setEditTrialActivatedAt] = useState(""); // Removed
-  // const [editServiceCreationCount, setEditServiceCreationCount] = useState(0); // Removed
   const [isPremiumEditDialogOpen, setIsPremiumEditDialogOpen] = useState(false);
 
   const [editingServiceForDate, setEditingServiceForDate] = useState(null);
@@ -50,11 +48,11 @@ export default function UserDetails({ params }) {
 
   const fetchSpecificUserData = async () => {
     try {
-      const userDetails = await UserService.getUserDetails(params.id); //
-      if (userDetails?.user) { // API response now wraps user data under 'user' key
+      const userDetails = await UserService.getUserDetails(params.id);
+      if (userDetails?.user) {
         setUserData({
           ...userDetails.user,
-          services: (userDetails.user.services || []).map((service) => ({ //
+          services: (userDetails.user.services || []).map((service) => ({
             ...service,
             source_channels: Array.isArray(service.source_channels)
               ? service.source_channels
@@ -76,14 +74,6 @@ export default function UserDetails({ params }) {
                 .split("T")[0]
             : ""
         );
-        // setEditTrialActivatedAt( // Removed
-        //   userDetails.user.trial_activated_at
-        //     ? new Date(userDetails.user.trial_activated_at)
-        //         .toISOString()
-        //         .split("T")[0]
-        //     : ""
-        // );
-        // setEditServiceCreationCount(userDetails.user.service_creation_count); // Removed
       } else {
         toast.error("کاربر مورد نظر یافت نشد.");
       }
@@ -97,12 +87,12 @@ export default function UserDetails({ params }) {
     const checkAuthAndLoadData = async () => {
       setLoading(true);
       try {
-        const isAuthenticated = await AuthService.isAuthenticated(); //
+        const isAuthenticated = await AuthService.isAuthenticated();
         if (!isAuthenticated) {
           router.replace("/login");
           return;
         }
-        const loggedInUser = AuthService.getStoredUser(); //
+        const loggedInUser = AuthService.getStoredUser();
         if (!loggedInUser?.isAdmin) {
           toast.error("دسترسی غیر مجاز. شما ادمین نیستید.");
           router.replace("/dashboard");
@@ -130,23 +120,18 @@ export default function UserDetails({ params }) {
   };
 
   const handleUserAccountUpdate = async (e) => {
-    // Renamed from handlePremiumUpdate
     e.preventDefault();
-    setIsSubmittingPremium(true); // Re-use this loading state for now
+    setIsSubmittingPremium(true);
     try {
-      const token = localStorage.getItem("auth_token"); //
+      const token = localStorage.getItem("auth_token");
       const payload = {
         is_premium: editIsPremium,
         premium_expiry_date: editPremiumExpiryDate
           ? new Date(editPremiumExpiryDate).toISOString()
           : null,
-        // trial_activated_at: editTrialActivatedAt // Removed
-        //   ? new Date(editTrialActivatedAt).toISOString()
-        //   : null,
-        // service_creation_count: editServiceCreationCount, // Removed
       };
 
-      const response = await fetch(`/api/admin/users/${params.id}`, { //
+      const response = await fetch(`/api/admin/users/${params.id}`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -185,9 +170,9 @@ export default function UserDetails({ params }) {
     if (!editingServiceForDate) return;
     setIsSubmittingServiceDate(true);
     try {
-      const token = localStorage.getItem("auth_token"); //
+      const token = localStorage.getItem("auth_token");
       const response = await fetch(
-        `/api/admin/services/${editingServiceForDate.id}`, //
+        `/api/admin/services/${editingServiceForDate.id}`,
         {
           method: "PUT",
           headers: {
@@ -314,8 +299,6 @@ export default function UserDetails({ params }) {
                       کاربرد دارد. خالی بگذارید برای حذف.
                     </p>
                   </div>
-                  {/* Removed trial_activated_at from admin edit form */}
-                  {/* Removed service_creation_count from admin edit form */}
                   <DialogFooter>
                     <DialogClose asChild>
                       <Button type="button" variant="outline">
@@ -371,8 +354,8 @@ export default function UserDetails({ params }) {
                 <Input value={formattedPremiumExpiry} readOnly />
               </div>
               <div>
-                <Label>مهلت تست استفاده شده؟</Label> {/* Changed label */}
-                <Input value={userData.trial_activated_at ? "بله" : "خیر"} readOnly /> {/* Display "بله" or "خیر" */}
+                <Label>مهلت تست استفاده شده؟</Label>
+                <Input value={userData.trial_activated_at ? "بله" : "خیر"} readOnly />
               </div>
               <div>
                 <Label>تعداد سرویس ایجاد شده</Label>
@@ -450,7 +433,7 @@ export default function UserDetails({ params }) {
                     : "-";
 
                   // Use tariff settings for trial expiry calculation if available in user object
-                  const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15; //
+                  const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15;
 
                   // Logic for service status based on user's overall account status
                   const now = new Date();
@@ -561,7 +544,6 @@ export default function UserDetails({ params }) {
                               </ul>
                             </div>
                           )}
-                          {/* ... other service details ... */}
                         </div>
                       </CardContent>
                     </Card>

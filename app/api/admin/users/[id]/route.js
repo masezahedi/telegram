@@ -1,16 +1,16 @@
 // File: app/api/admin/users/[id]/route.js
 import { NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth"; //
-import { openDb } from "@/lib/db"; //
-import { startUserServices } from "@/server/services/telegram/service-manager"; // Import to restart services
+import { verifyToken } from "@/lib/auth";
+import { openDb } from "@/lib/db";
+import { startUserServices } from "@/server/services/telegram/service-manager";
 
 export const dynamic = "force-dynamic";
 
 // GET function remains the same
 export async function GET(request, { params }) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1]; //
-    const decoded = await verifyToken(token); //
+    const token = request.headers.get("authorization")?.split(" ")[1];
+    const decoded = await verifyToken(token);
 
     if (!decoded) {
       return NextResponse.json(
@@ -19,9 +19,9 @@ export async function GET(request, { params }) {
       );
     }
 
-    const db = await openDb(); //
+    const db = await openDb();
 
-    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [ //
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
       decoded.userId,
     ]);
 
@@ -34,15 +34,15 @@ export async function GET(request, { params }) {
 
     const user = await db.get(
       `
-      SELECT 
+      SELECT
         u.id, u.name, u.email, u.phone_number, u.telegram_session,
-        u.is_admin, u.is_premium, u.premium_expiry_date, 
+        u.is_admin, u.is_premium, u.premium_expiry_date,
         u.trial_activated_at, u.service_creation_count, u.created_at,
         us.gemini_api_key
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
       WHERE u.id = ?
-    `, //
+    `,
       [params.id]
     );
 
@@ -56,17 +56,17 @@ export async function GET(request, { params }) {
     const services = await db.all(
       `
       SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC
-    `, //
+    `,
       [params.id]
     );
 
     return NextResponse.json({
-      success: true, //
+      success: true,
       user: {
-        ...user, //
-        is_admin: Boolean(user.is_admin), //
-        is_premium: Boolean(user.is_premium), //
-        services: services.map((s) => ({ //
+        ...user,
+        is_admin: Boolean(user.is_admin),
+        is_premium: Boolean(user.is_premium),
+        services: services.map((s) => ({
           ...s,
           source_channels: JSON.parse(s.source_channels || "[]"),
           target_channels: JSON.parse(s.target_channels || "[]"),
@@ -85,8 +85,8 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1]; //
-    const decodedAdmin = await verifyToken(token); //
+    const token = request.headers.get("authorization")?.split(" ")[1];
+    const decodedAdmin = await verifyToken(token);
 
     if (!decodedAdmin) {
       return NextResponse.json(
@@ -95,8 +95,8 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const db = await openDb(); //
-    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [ //
+    const db = await openDb();
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
       decodedAdmin.userId,
     ]);
 
@@ -112,6 +112,19 @@ export async function PUT(request, { params }) {
 
     const validFieldsToUpdate = [];
     const queryParams = [];
+
+    // Fetch current user data to preserve trial_activated_at if not explicitly changed
+    const existingUser = await db.get(
+      "SELECT is_premium, trial_activated_at FROM users WHERE id = ?",
+      [userIdToUpdate]
+    );
+
+    if (!existingUser) {
+      return NextResponse.json(
+        { success: false, error: "کاربر یافت نشد" },
+        { status: 404 }
+      );
+    }
 
     // Allow changing is_premium
     if (
@@ -132,15 +145,10 @@ export async function PUT(request, { params }) {
       );
     }
 
-    // NEW LOGIC: If is_premium is set to false AND trial_activated_at exists,
-    // ensure premium_expiry_date is set based on trial if not explicitly set.
-    // However, for admin panel, we assume premium_expiry_date directly controls expiry.
-    // If setting is_premium to false, trial_activated_at should probably be cleared too.
-    if (payload.hasOwnProperty("is_premium") && payload.is_premium === false) {
-      validFieldsToUpdate.push("trial_activated_at = ?");
-      queryParams.push(null); // Clear trial_activated_at if user is no longer premium
-    }
-
+    // IMPORTANT: Do NOT set trial_activated_at to null here.
+    // It should only be set once by the user activating trial.
+    // If an admin wants to explicitly reset a trial, a separate action/field might be needed.
+    // For now, removing the problematic line that clears trial_activated_at.
 
     if (validFieldsToUpdate.length === 0) {
       return NextResponse.json(
@@ -157,7 +165,7 @@ export async function PUT(request, { params }) {
     const sql = `UPDATE users SET updated_at = CURRENT_TIMESTAMP, ${sqlSetStatements} WHERE id = ?`;
     queryParams.push(userIdToUpdate);
 
-    const result = await db.run(sql, ...queryParams); //
+    const result = await db.run(sql, ...queryParams);
 
     if (result.changes === 0) {
       return NextResponse.json(
@@ -166,11 +174,9 @@ export async function PUT(request, { params }) {
       );
     }
 
-    // NEW LOGIC: After update, re-evaluate user services.
-    // If the expiry date is now in the past, services should be stopped.
-    // This is crucial for immediate effect of admin changes.
+    // After update, re-evaluate user services.
     const updatedUser = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
       [userIdToUpdate]
     );
 
@@ -180,10 +186,10 @@ export async function PUT(request, { params }) {
         if (updatedUser.is_premium && updatedUser.premium_expiry_date && new Date(updatedUser.premium_expiry_date) < now) {
             shouldStopServices = true; // Premium expired
         } else if (!updatedUser.is_premium && updatedUser.trial_activated_at) {
-            const tariffSettings = await db.get("SELECT normal_user_trial_days FROM tariff_settings LIMIT 1"); //
-            const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
+            const tariffSettings = await db.get("SELECT normal_user_trial_days FROM tariff_settings LIMIT 1");
+            const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
             const trialExpiryDate = new Date(updatedUser.trial_activated_at);
-            trialExpiryDate.setDate(trialExpiryDate.getDate() + normalUserTrialDays);
+            trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
             if (now >= trialExpiryDate) {
                 shouldStopServices = true; // Trial expired
             }
@@ -211,7 +217,7 @@ export async function PUT(request, { params }) {
       },
     });
   } catch (error) {
-    console.error("Admin update user error:", error); //
+    console.error("Admin update user error:", error);
     return NextResponse.json(
       { success: false, error: "خطا در سرور هنگام به‌روزرسانی اطلاعات کاربر." },
       { status: 500 }
