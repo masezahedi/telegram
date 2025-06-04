@@ -128,14 +128,38 @@ export default function ForwardingServiceForm({
   const isTelegramConnected = userAccountStatus?.isTelegramConnected;
   const isAdmin = userAccountStatus?.isAdmin;
   const isPremium = userAccountStatus?.isPremium;
-  const trialActivated = userAccountStatus?.trialActivated; // This flag comes from page.js now
+  const trialActivatedAt = userAccountStatus?.trialActivatedAt; // This is the actual timestamp
+  const premiumExpiryDate = userAccountStatus?.premiumExpiryDate; // This is the actual timestamp
 
-  // Determine if the user's account is currently expired based on premium_expiry_date
+
+  // Determine if the user's account is currently expired
   const now = new Date();
-  const isAccountExpired = userAccountStatus?.premiumExpiryDate
-    ? (new Date(userAccountStatus.premiumExpiryDate) < now)
-    : (!isPremium && trialActivated && (!userAccountStatus.premiumExpiryDate || new Date(userAccountStatus.premiumExpiryDate) < now));
+  let isAccountExpired = false;
 
+  // Check if trialActivatedAt exists (meaning trial was activated)
+  const isTrialActuallyActivated = Boolean(trialActivatedAt);
+
+  if (!isAdmin) {
+    if (isPremium) {
+      // Premium users: check premiumExpiryDate
+      if (premiumExpiryDate && new Date(premiumExpiryDate) < now) {
+        isAccountExpired = true;
+      }
+    } else {
+      // Normal users: check trial_activated_at and calculate expiry based on normalUserTrialDays
+      if (isTrialActuallyActivated) {
+        const trialStartDate = new Date(trialActivatedAt);
+        const trialEndDate = new Date(trialStartDate);
+        trialEndDate.setDate(trialStartDate.getDate() + normalUserTrialDays);
+        if (trialEndDate < now) {
+          isAccountExpired = true;
+        }
+      } else {
+        // If not premium and trial never activated, consider as expired for service creation/activation purposes
+        isAccountExpired = true; // This handles the case where trial hasn't started yet
+      }
+    }
+  }
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -256,11 +280,11 @@ export default function ForwardingServiceForm({
     if (!isAdmin) {
       if (isAccountExpired && isNewService) { // Only block new service creation for expired non-admins
         toast.error(
-          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
+          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدیدی ایجاد کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
         );
         return;
       }
-      if (!isPremium && !trialActivated && isNewService) { // Only for new services if normal user and trial not activated
+      if (!isPremium && !isTrialActuallyActivated && isNewService) { // Only for new services if normal user and trial not activated
         toast.error(
           `لطفاً برای شروع ایجاد سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید. (در بخش لیست سرویس‌ها)`
         );
@@ -397,7 +421,7 @@ export default function ForwardingServiceForm({
     ? "مدیران محدودیتی در تعداد کانال ندارند."
     : isPremium
       ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`
-      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
+      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
 
 
   // NEW LOGIC: Conditional rendering based on Telegram connection and trial status
@@ -418,14 +442,14 @@ export default function ForwardingServiceForm({
   }
 
   // NEW LOGIC: Block new service creation if account is expired or trial not activated
-  if (!service?.id && !isAdmin && (isAccountExpired || !trialActivated)) {
+  if (!service?.id && !isAdmin && (isAccountExpired)) { // Simplified: isAccountExpired already covers trial not activated
     return (
       <Alert variant="destructive">
         <Info className="h-4 w-4" />
         <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
         <AlertDescription>
           امکان ایجاد سرویس جدید وجود ندارد. لطفاً{" "}
-          {!isPremium && !trialActivated ? `مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید` : ""}
+          {!isPremium && !isTrialActuallyActivated ? `مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید` : ""}
           {isAccountExpired ? " یا اشتراک خود را ارتقا دهید." : "."}
         </AlertDescription>
       </Alert>
@@ -994,7 +1018,7 @@ export default function ForwardingServiceForm({
             className="w-full sm:w-auto"
             disabled={
               loading ||
-              (!service?.id && !isAdmin && (isAccountExpired || !trialActivated))
+              (!service?.id && !isAdmin && (isAccountExpired))
             }
           >
             {loading
