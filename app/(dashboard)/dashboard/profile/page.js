@@ -24,9 +24,17 @@ export default function Profile() {
           return;
         }
 
-        const userData = await UserService.getCurrentUser();
-        if (userData) {
-          setUser(userData);
+        // Fetch current user details including tariff settings
+        const userDataResponse = await UserService.getCurrentUser();
+        if (userDataResponse?.user) { // Access the 'user' property from the response
+          // Update localStorage with fresh user data which now includes tariffSettings
+          localStorage.setItem("user", JSON.stringify({
+            ...userDataResponse.user,
+            isTelegramConnected: Boolean(userDataResponse.user.telegramSession),
+            isAdmin: Boolean(userDataResponse.user.isAdmin),
+            isPremium: Boolean(userDataResponse.user.isPremium),
+          }));
+          setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
         } else {
           router.replace('/login');
         }

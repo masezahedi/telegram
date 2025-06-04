@@ -30,6 +30,10 @@ export async function GET(request) {
       );
     }
 
+    // Fetch tariff settings for the user's dashboard logic
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+
+
     return NextResponse.json({
       success: true,
       user: {
@@ -43,6 +47,15 @@ export async function GET(request) {
         premiumExpiryDate: user.premium_expiry_date, // Represents overall account expiry
         trialActivatedAt: user.trial_activated_at, // New
         serviceCreationCount: user.service_creation_count,
+        // Include tariff settings
+        tariffSettings: {
+          normalUserTrialDays: tariffSettings?.normal_user_trial_days ?? 15,
+          premiumUserDefaultDays: tariffSettings?.premium_user_default_days ?? 30,
+          normalUserMaxActiveServices: tariffSettings?.normal_user_max_active_services ?? 1,
+          premiumUserMaxActiveServices: tariffSettings?.premium_user_max_active_services ?? 5,
+          normalUserMaxChannelsPerService: tariffSettings?.normal_user_max_channels_per_service ?? 1,
+          premiumUserMaxChannelsPerService: tariffSettings?.premium_user_max_channels_per_service ?? 10,
+        },
       },
     });
   } catch (error) {

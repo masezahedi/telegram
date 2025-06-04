@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { UserService } from '@/lib/services/user-service'; // Make sure UserService is imported
 import { AuthService } from "@/lib/services/auth-service";
 import {
   Card,
@@ -32,8 +33,15 @@ export default function Services() {
       // Fallback or if localStorage is cleared/stale
       const freshUser = await UserService.getCurrentUser(); // Assuming UserService exists and fetches fresh data
       if (freshUser) {
-        setUser(freshUser);
-        // Optionally update localStorage here if needed, though login should be the source of truth
+        // Update local storage with fresh data, including tariff settings
+        const { user: freshUserData } = freshUser; // getCurrentUser returns { user: ... }
+        localStorage.setItem("user", JSON.stringify({
+          ...freshUserData,
+          isTelegramConnected: Boolean(freshUserData.telegramSession),
+          isAdmin: Boolean(freshUserData.isAdmin),
+          isPremium: Boolean(freshUserData.isPremium),
+        }));
+        setUser(freshUserData);
       } else {
         toast.error("خطا در دریافت اطلاعات کاربر.");
         router.replace("/login");
@@ -72,11 +80,15 @@ export default function Services() {
 
   let accountStatusMessage = "";
   let accountExpiryDateFormatted = "";
-  let isAccountExpired = false; // Renamed from isExpired for clarity
+  let isAccountExpired = false;
   let alertVariant = "default";
+  
+  // Extract tariff settings from user object
+  const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15;
+  const premiumUserDefaultDays = user?.tariffSettings?.premiumUserDefaultDays ?? 30;
+
 
   if (user && !user.isAdmin) {
-    // Only show status for non-admin users
     const now = new Date();
     if (user.isPremium) {
       if (user.premiumExpiryDate) {
@@ -92,7 +104,7 @@ export default function Services() {
           alertVariant = "destructive";
         } else {
           accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${accountExpiryDateFormatted} معتبر است.`;
-          alertVariant = "default"; // Or a success/info variant
+          alertVariant = "default";
         }
       } else {
         accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`;
@@ -100,30 +112,28 @@ export default function Services() {
       }
     } else {
       // Normal user
-      if (user.trialActivatedAt && user.premiumExpiryDate) {
-        // premiumExpiryDate is the trial end date here
-        const expiry = new Date(user.premiumExpiryDate);
-        accountExpiryDateFormatted = expiry.toLocaleDateString("fa-IR", {
+      if (user.trialActivatedAt) {
+        const trialActivatedDate = new Date(user.trialActivatedAt);
+        const trialExpiry = new Date(trialActivatedDate);
+        trialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays); // Use dynamic trial days
+        
+        accountExpiryDateFormatted = trialExpiry.toLocaleDateString("fa-IR", {
           year: "numeric",
           month: "long",
           day: "numeric",
         });
-        if (now >= expiry) {
-          accountStatusMessage = `مهلت استفاده ۱۵ روزه شما در تاریخ ${accountExpiryDateFormatted} به پایان رسیده است.`;
+        
+        if (now >= trialExpiry) {
+          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما در تاریخ ${accountExpiryDateFormatted} به پایان رسیده است.`;
           isAccountExpired = true;
           alertVariant = "destructive";
         } else {
-          accountStatusMessage = `مهلت استفاده ۱۵ روزه شما تا تاریخ ${accountExpiryDateFormatted} فعال است.`;
+          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${accountExpiryDateFormatted} فعال است.`;
           alertVariant = "default";
         }
-      } else if (user.trialActivatedAt && !user.premiumExpiryDate) {
-        accountStatusMessage =
-          "خطا در محاسبه مهلت استفاده. لطفاً با پشتیبانی تماس بگیرید.";
-        isAccountExpired = true; // Treat as expired to be safe
-        alertVariant = "destructive";
       } else {
         accountStatusMessage =
-          "شما کاربر عادی هستید. با فعال‌سازی اولین سرویس، مهلت ۱۵ روزه شما آغاز می‌شود.";
+          `شما کاربر عادی هستید. با فعال‌سازی اولین سرویس، مهلت ${normalUserTrialDays} روزه شما آغاز می‌شود.`;
         alertVariant = "default";
       }
     }
@@ -144,7 +154,7 @@ export default function Services() {
       <div className="p-6">
         {user &&
           !user.isAdmin &&
-          accountStatusMessage && ( // Only show for non-admins
+          accountStatusMessage && (
             <Alert
               className={`mb-4 ${
                 isAccountExpired
@@ -199,6 +209,9 @@ export default function Services() {
                     isExpired: isAccountExpired,
                     isPremium: user?.isPremium,
                     isAdmin: user?.isAdmin,
+                    // Pass tariff settings to form for client-side validation messages if needed
+                    normalUserMaxChannelsPerService: user?.tariffSettings?.normalUserMaxChannelsPerService,
+                    premiumUserMaxChannelsPerService: user?.tariffSettings?.premiumUserMaxChannelsPerService,
                   }}
                 />
               </TabsContent>

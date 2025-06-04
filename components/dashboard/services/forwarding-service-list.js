@@ -31,6 +31,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [editingService, setEditingService] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
+  // Extract tariff settings from userAccountStatus
+  const normalUserMaxActiveServices = userAccountStatus?.normalUserMaxActiveServices ?? 1;
+  const premiumUserMaxActiveServices = userAccountStatus?.premiumUserMaxActiveServices ?? 5;
+
+
   const loadServices = async () => {
     setLoading(true);
     try {
@@ -60,6 +65,22 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       await loadServices();
       return;
     }
+    // Check active service limit if activating
+    if (newIsActiveStatus && !userAccountStatus?.isAdmin) {
+      const currentActiveServices = services.filter(s => s.is_active).length;
+      const maxActiveServices = userAccountStatus?.isPremium
+        ? premiumUserMaxActiveServices
+        : normalUserMaxActiveServices;
+
+      if (currentActiveServices >= maxActiveServices) {
+        toast.error(
+          `شما به حداکثر تعداد سرویس‌های فعال (${maxActiveServices}) رسیده‌اید. برای فعال‌سازی این سرویس، لطفاً ابتدا یک سرویس دیگر را غیرفعال کنید.`
+        );
+        await loadServices(); // Reload to revert UI if toast prevents action
+        return;
+      }
+    }
+
     try {
       const result = await ForwardingService.updateServiceStatus(
         id,
@@ -293,9 +314,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                           handleStatusChange(service.id, checked)
                         }
                         disabled={
-                          userAccountStatus?.isExpired &&
+                          (userAccountStatus?.isExpired &&
                           !service.is_active &&
-                          !userAccountStatus?.isAdmin
+                          !userAccountStatus?.isAdmin) ||
+                          (!userAccountStatus?.isAdmin && !userAccountStatus?.isPremium && services.filter(s => s.is_active).length >= (normalUserMaxActiveServices) && !service.is_active) || // Disable if normal user and max active services reached
+                          (!userAccountStatus?.isAdmin && userAccountStatus?.isPremium && services.filter(s => s.is_active).length >= (premiumUserMaxActiveServices) && !service.is_active) // Disable if premium user and max active services reached
                         }
                         aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
                         dir="ltr" // سوییچ معمولا ظاهر LTR دارد

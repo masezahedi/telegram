@@ -39,6 +39,7 @@ export default function UserDetails({ params }) {
   const [editIsPremium, setEditIsPremium] = useState(false);
   const [editPremiumExpiryDate, setEditPremiumExpiryDate] = useState("");
   const [editTrialActivatedAt, setEditTrialActivatedAt] = useState(""); // New state for trial activation
+  const [editServiceCreationCount, setEditServiceCreationCount] = useState(0); // NEW: State for service creation count
   const [isPremiumEditDialogOpen, setIsPremiumEditDialogOpen] = useState(false);
 
   const [editingServiceForDate, setEditingServiceForDate] = useState(null);
@@ -81,6 +82,7 @@ export default function UserDetails({ params }) {
                 .split("T")[0]
             : ""
         );
+        setEditServiceCreationCount(userDetails.service_creation_count); // NEW: Initialize service creation count
       } else {
         toast.error("کاربر مورد نظر یافت نشد.");
       }
@@ -134,14 +136,13 @@ export default function UserDetails({ params }) {
       const token = localStorage.getItem("auth_token");
       const payload = {
         is_premium: editIsPremium,
-        // Only send expiry date if user is premium, otherwise it might be confusing.
-        // Or always send it, allowing admin to set an expiry even if not premium (for future premium status)
         premium_expiry_date: editPremiumExpiryDate
           ? new Date(editPremiumExpiryDate).toISOString()
           : null,
         trial_activated_at: editTrialActivatedAt
           ? new Date(editTrialActivatedAt).toISOString()
           : null,
+        service_creation_count: editServiceCreationCount, // NEW: Include service creation count
       };
 
       const response = await fetch(`/api/admin/users/${params.id}`, {
@@ -327,6 +328,23 @@ export default function UserDetails({ params }) {
                       برای حذف.
                     </p>
                   </div>
+                  {/* NEW: Service Creation Count */}
+                  <div>
+                    <Label htmlFor="service_creation_count_edit">
+                      تعداد سرویس ایجاد شده
+                    </Label>
+                    <Input
+                      id="service_creation_count_edit"
+                      type="number"
+                      value={editServiceCreationCount}
+                      onChange={(e) => setEditServiceCreationCount(parseInt(e.target.value, 10))}
+                      className="mt-1"
+                      min="0"
+                    />
+                    <p className="text-sm text-muted-foreground mt-1">
+                      تعداد کل سرویس‌هایی که کاربر ایجاد کرده است.
+                    </p>
+                  </div>
                   <DialogFooter>
                     <DialogClose asChild>
                       <Button type="button" variant="outline">
@@ -460,9 +478,12 @@ export default function UserDetails({ params }) {
                       )
                     : "-";
 
+                  // Use tariff settings for trial expiry calculation if available in user object
+                  const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15;
+
                   if (!userData.is_premium && service.service_activated_at) {
                     const expiry = new Date(service.service_activated_at);
-                    expiry.setDate(expiry.getDate() + 15);
+                    expiry.setDate(expiry.getDate() + normalUserTrialDays); // Use dynamic trial days
                     if (new Date() > expiry) {
                       serviceStatusMessage = `منقضی شده در: ${expiry.toLocaleDateString(
                         "fa-IR"

@@ -1,3 +1,4 @@
+// components/dashboard/dashboard-layout.js
 "use client";
 
 import { useState, useEffect } from "react";
@@ -14,6 +15,7 @@ import {
   Settings,
   MessageCircle,
   Users,
+  DollarSign, // NEW: Import DollarSign icon
 } from "lucide-react";
 import { AuthService } from "@/lib/services/auth-service";
 import ConnectionStatus from "@/components/dashboard/connection-status";
@@ -96,14 +98,24 @@ export default function DashboardLayout({ children, user }) {
                         </Button>
                       </Link>
                       {user?.isAdmin && (
-                        <Link href="/dashboard/users" passHref>
-                          <Button
-                            variant="ghost"
-                            className="w-full justify-start"
-                          >
-                            <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
-                          </Button>
-                        </Link>
+                        <>
+                          <Link href="/dashboard/users" passHref>
+                            <Button
+                              variant="ghost"
+                              className="w-full justify-start"
+                            >
+                              <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
+                            </Button>
+                          </Link>
+                          <Link href="/dashboard/tariffs" passHref>
+                            <Button
+                              variant="ghost"
+                              className="w-full justify-start"
+                            >
+                              <DollarSign className="ml-2 h-5 w-5" /> مدیریت تعرفه‌ها
+                            </Button>
+                          </Link>
+                        </>
                       )}
                     </nav>
                   </div>
@@ -171,11 +183,21 @@ export default function DashboardLayout({ children, user }) {
                   </Button>
                 </Link>
                 {user?.isAdmin && (
-                  <Link href="/dashboard/users" passHref>
-                    <Button variant="ghost" className="w-full justify-start">
-                      <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
-                    </Button>
-                  </Link>
+                  <>
+                    <Link href="/dashboard/users" passHref>
+                      <Button variant="ghost" className="w-full justify-start">
+                        <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
+                      </Button>
+                    </Link>
+                    <Link href="/dashboard/tariffs" passHref>
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start"
+                      >
+                        <DollarSign className="ml-2 h-5 w-5" /> مدیریت تعرفه‌ها
+                      </Button>
+                    </Link>
+                  </>
                 )}
               </nav>
             </div>

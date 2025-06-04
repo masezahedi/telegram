@@ -119,6 +119,11 @@ export async function POST(request) {
       effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
     }
 
+    // Fetch tariff settings
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
+    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10;
+
     // --- Start of Limit Checks for Creating Service ---
     if (!user.is_admin) {
       // Check 1: Overall account/trial expiry for creating new services
@@ -139,30 +144,34 @@ export async function POST(request) {
         );
       }
 
-      // Tier-based limits
-      if (
-        user.is_premium &&
-        effectiveAccountExpiryDate &&
-        now < effectiveAccountExpiryDate
-      ) {
-        // Premium User: No specific limits on source/destination count at creation
-        // Active service count limit is checked during activation (PUT)
-      } else {
-        // Normal User (or expired premium)
+      // Tier-based limits on channel count
+      if (user.is_premium) {
         if (
-          sourceChannels.filter(Boolean).length > 1 ||
-          targetChannels.filter(Boolean).length > 1
+          sourceChannels.filter(Boolean).length > premiumUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length > premiumUserMaxChannelsPerService
         ) {
           return NextResponse.json(
             {
               success: false,
-              error:
-                "کاربران عادی فقط می‌توانند یک کانال مبدأ و یک کانال مقصد تعریف کنند.",
+              error: `کاربران پرمیوم حداکثر می‌توانند ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
             },
             { status: 403 }
           );
         }
-        // service_creation_count logic was removed previously.
+      } else {
+        // Normal User
+        if (
+          sourceChannels.filter(Boolean).length > normalUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length > normalUserMaxChannelsPerService
+        ) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `کاربران عادی فقط می‌توانند ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
+            },
+            { status: 403 }
+          );
+        }
       }
     }
     // --- End of Limit Checks for Creating Service ---
@@ -247,6 +256,14 @@ export async function PUT(request) {
     let effectiveAccountExpiryDate = null;
     let userIsEffectivelyPremium = false;
 
+    // Fetch tariff settings
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
+    const premiumUserDefaultDays = tariffSettings?.premium_user_default_days ?? 30;
+    const normalUserMaxActiveServices = tariffSettings?.normal_user_max_active_services ?? 1;
+    const premiumUserMaxActiveServices = tariffSettings?.premium_user_max_active_services ?? 5;
+    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
+
     if (user.is_admin) {
       userIsEffectivelyPremium = true; // Admins have no restrictions
     } else if (
@@ -258,11 +275,13 @@ export async function PUT(request) {
       userIsEffectivelyPremium = true;
     } else if (
       !user.is_premium &&
-      user.trial_activated_at &&
-      user.premium_expiry_date
+      user.trial_activated_at
     ) {
-      // Normal user whose trial has started, premium_expiry_date is their trial end.
-      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+      // Normal user whose trial has started.
+      const trialActivatedDate = new Date(user.trial_activated_at);
+      const calculatedTrialExpiry = new Date(trialActivatedDate);
+      calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+      effectiveAccountExpiryDate = calculatedTrialExpiry;
       userIsEffectivelyPremium = false;
     } else if (!user.is_premium && !user.trial_activated_at) {
       // Normal user, trial not yet started. They can activate one service to start trial.
@@ -310,12 +329,12 @@ export async function PUT(request) {
             "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
             [decoded.userId, serviceIdToUpdate]
           );
-          if (activeServicesCount.count >= 5) {
+          if (activeServicesCount.count >= premiumUserMaxActiveServices) {
             return NextResponse.json(
               {
                 success: false,
                 error:
-                  "کاربران پرمیوم حداکثر می‌توانند ۵ سرویس فعال داشته باشند.",
+                  `کاربران پرمیوم حداکثر می‌توانند ${premiumUserMaxActiveServices} سرویس فعال داشته باشند.`,
               },
               { status: 403 }
             );
@@ -326,11 +345,11 @@ export async function PUT(request) {
             "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
             [decoded.userId, serviceIdToUpdate]
           );
-          if (activeServicesCount.count >= 1) {
+          if (activeServicesCount.count >= normalUserMaxActiveServices) {
             return NextResponse.json(
               {
                 success: false,
-                error: "کاربران عادی فقط می‌توانند یک سرویس فعال داشته باشند.",
+                error: `کاربران عادی فقط می‌توانند ${normalUserMaxActiveServices} سرویس فعال داشته باشند.`,
               },
               { status: 403 }
             );
@@ -343,14 +362,14 @@ export async function PUT(request) {
             serviceToUpdate.target_channels || "[]"
           );
           if (
-            sourceChannels.filter(Boolean).length > 1 ||
-            targetChannels.filter(Boolean).length > 1
+            sourceChannels.filter(Boolean).length > normalUserMaxChannelsPerService ||
+            targetChannels.filter(Boolean).length > normalUserMaxChannelsPerService
           ) {
             return NextResponse.json(
               {
                 success: false,
                 error:
-                  "سرویس کاربران عادی فقط می‌تواند یک کانال مبدأ و یک کانال مقصد داشته باشد.",
+                  `سرویس کاربران عادی فقط می‌تواند ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد داشته باشد.`,
               },
               { status: 403 }
             );
@@ -375,7 +394,7 @@ export async function PUT(request) {
     updateServiceParams.push(serviceIdToUpdate, decoded.userId);
     await db.run(updateServiceSQL, ...updateServiceParams);
 
-    // Set user's trial_activated_at and calculate premium_expiry_date (for normal user's 15-day trial)
+    // Set user's trial_activated_at and calculate premium_expiry_date (for normal user's trial)
     // This happens when a normal user activates *any* service for the *very first time*
     if (
       isActive &&
@@ -385,7 +404,7 @@ export async function PUT(request) {
     ) {
       const trialStart = new Date();
       const trialEnd = new Date(trialStart);
-      trialEnd.setDate(trialStart.getDate() + 15);
+      trialEnd.setDate(trialStart.getDate() + normalUserTrialDays);
 
       await db.run(
         "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

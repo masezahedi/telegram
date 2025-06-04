@@ -121,6 +121,10 @@ export default function ForwardingServiceForm({
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [isTelegramConnected, setIsTelegramConnected] = useState(false);
 
+  // Extract tariff settings from userAccountStatus
+  const normalUserMaxChannelsPerService = userAccountStatus?.normalUserMaxChannelsPerService ?? 1;
+  const premiumUserMaxChannelsPerService = userAccountStatus?.premiumUserMaxChannelsPerService ?? 10;
+
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -273,6 +277,27 @@ export default function ForwardingServiceForm({
       return;
     }
 
+    // Client-side channel count validation based on tariff settings
+    if (!userAccountStatus?.isAdmin) {
+      const currentMaxChannels = userAccountStatus?.isPremium
+        ? premiumUserMaxChannelsPerService
+        : normalUserMaxChannelsPerService;
+
+      if (
+        finalSourceChannels.length > currentMaxChannels ||
+        finalTargetChannels.length > currentMaxChannels
+      ) {
+        const role = userAccountStatus?.isPremium ? "پرمیوم" : "عادی";
+        const errorMsg = `کاربران ${role} حداکثر می‌توانند ${currentMaxChannels} کانال مبدأ و ${currentMaxChannels} کانال مقصد تعریف کنند.`;
+        toast.error(errorMsg);
+        // Set errors for the fields if needed, though toast might be sufficient for general user feedback
+        form.setError("sourceChannels.0", { type: "manual", message: errorMsg });
+        form.setError("targetChannels.0", { type: "manual", message: errorMsg });
+        return;
+      }
+    }
+
+
     if (values.type === "copy") {
       if (values.startFromId && values.startFromId.trim()) {
         const messageId = parseInt(values.startFromId.trim(), 10);
@@ -349,6 +374,14 @@ export default function ForwardingServiceForm({
 
   const copyHistoryEnabled = form.watch("copyHistory");
   const startFromIdWatched = form.watch("startFromId");
+
+  // Determine channel limits message
+  const channelLimitMessage = userAccountStatus?.isAdmin
+    ? "مدیران محدودیتی در تعداد کانال ندارند."
+    : userAccountStatus?.isPremium
+      ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدا و مقصد تعریف کنند.`
+      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و مقصد تعریف کنند.`;
+
 
   if (!isTelegramConnected) {
     return (
@@ -469,6 +502,12 @@ export default function ForwardingServiceForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+             <Alert variant="default" className="border-info text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400">
+              <Info className="h-4 w-4" />
+              <AlertDescription>
+                {channelLimitMessage}
+              </AlertDescription>
+            </Alert>
             {/* Source Channels Section */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium block text-right">

@@ -138,6 +138,13 @@ export async function PUT(request, { params }) {
       );
     }
 
+    // Add service_creation_count to updatable fields for admin
+    if (payload.hasOwnProperty("service_creation_count") && typeof payload.service_creation_count === "number" && payload.service_creation_count >= 0) {
+      validFieldsToUpdate.push("service_creation_count = ?");
+      queryParams.push(payload.service_creation_count);
+    }
+
+
     if (validFieldsToUpdate.length === 0) {
       return NextResponse.json(
         {
@@ -163,7 +170,7 @@ export async function PUT(request, { params }) {
     }
 
     const updatedUser = await db.get(
-      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
+      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at, service_creation_count FROM users WHERE id = ?",
       [userIdToUpdate]
     );
 

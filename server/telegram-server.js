@@ -206,6 +206,9 @@ app.post("/services/stop", async (req, res) => {
   }
 });
 
+// New: Tariff Settings API
+app.use("/tariff-settings", require("./routes/tariff-settings"));
+
 // Health check endpoint
 app.get("/health", (req, res) => {
   const {
@@ -229,6 +232,11 @@ async function checkAndExpireServices() {
     const db = await openDb();
     const now = new Date();
     const nowISO = now.toISOString();
+
+    // Fetch tariff settings
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
+    const premiumUserDefaultDays = tariffSettings?.premium_user_default_days ?? 30;
 
     // 1. Handle premium users whose subscription expired
     const expiredPremiumUsers = await db.all(
@@ -272,45 +280,54 @@ async function checkAndExpireServices() {
       // TODO: Notify user about premium expiry (e.g., via Telegram if session is valid or email)
     }
 
-    // 2. Handle normal users whose 15-day trial (based on premium_expiry_date set from trial_activated_at) expired
-    // These are users who are NOT admin, NOT premium, and their premium_expiry_date (acting as account_expiry_date from trial) is past
+    // 2. Handle normal users whose trial (based on trial_activated_at and normal_user_trial_days) expired
     const expiredNormalUsers = await db.all(
       `
-      SELECT id FROM users
+      SELECT id, trial_activated_at FROM users
       WHERE is_admin = 0 AND is_premium = 0 
-        AND trial_activated_at IS NOT NULL 
-        AND premium_expiry_date IS NOT NULL 
-        AND premium_expiry_date < ?
-    `,
-      [nowISO]
+        AND trial_activated_at IS NOT NULL
+    `
     );
 
     for (const user of expiredNormalUsers) {
-      console.log(
-        `⏳ Trial period expired for normal user ${user.id}. Deactivating services.`
-      );
-      const userServices = await db.all(
-        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
-        [user.id]
-      );
-      for (const service of userServices) {
+      const trialActivatedDate = new Date(user.trial_activated_at);
+      const trialExpiryDate = new Date(trialActivatedDate);
+      trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+
+      if (now >= trialExpiryDate) {
         console.log(
-          `🔴 Deactivating service ${service.id} for user ${user.id} due to trial expiry.`
+          `⏳ Trial period expired for normal user ${user.id}. Deactivating services.`
         );
+        
+        // Ensure premium_expiry_date is set to the actual expiry date for these users
         await db.run(
-          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-          [service.id]
+          "UPDATE users SET premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [trialExpiryDate.toISOString(), user.id]
         );
-        try {
-          await stopService(user.id, service.id); // from service-manager
-        } catch (err) {
-          console.error(
-            `Error stopping expired trial service ${service.id}:`,
-            err
+
+        const userServices = await db.all(
+          "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+          [user.id]
+        );
+        for (const service of userServices) {
+          console.log(
+            `🔴 Deactivating service ${service.id} for user ${user.id} due to trial expiry.`
           );
+          await db.run(
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [service.id]
+          );
+          try {
+            await stopService(user.id, service.id); // from service-manager
+          } catch (err) {
+            console.error(
+              `Error stopping expired trial service ${service.id}:`,
+              err
+            );
+          }
         }
+        // TODO: Notify user about trial expiry
       }
-      // TODO: Notify user about trial expiry
     }
     console.log("✅ Finished checking for expired accounts and services.");
   } catch (error) {

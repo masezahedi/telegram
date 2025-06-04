@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { AuthService } from '@/lib/services/auth-service';
+import { UserService } from '@/lib/services/user-service'; // Import UserService
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import DashboardLayout from '@/components/dashboard/dashboard-layout';
 import ApiKeySettings from '@/components/dashboard/settings/api-key-settings';
@@ -22,7 +23,21 @@ export default function Settings() {
           return;
         }
 
-        setUser(AuthService.getStoredUser());
+        // Fetch current user details including tariff settings
+        const userDataResponse = await UserService.getCurrentUser();
+        if (userDataResponse?.user) { // Access the 'user' property from the response
+          // Update localStorage with fresh user data which now includes tariffSettings
+          localStorage.setItem("user", JSON.stringify({
+            ...userDataResponse.user,
+            isTelegramConnected: Boolean(userDataResponse.user.telegramSession),
+            isAdmin: Boolean(userDataResponse.user.isAdmin),
+            isPremium: Boolean(userDataResponse.user.isPremium),
+          }));
+          setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
+        } else {
+          // If getCurrentUser fails or returns no user, redirect to login
+          router.replace('/login');
+        }
       } catch (error) {
         console.error('Error loading settings:', error);
         toast.error('خطا در بارگذاری تنظیمات');
