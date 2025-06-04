@@ -186,14 +186,14 @@ export default function TelegramConnection({ user }) {
   const updateUserSession = async (session, phoneNumber) => {
     try {
       const response = await UserService.updateTelegramSession({
-        telegramSession: session,
+        telegram_session: session, // Corrected to telegram_session
         phoneNumber: phoneNumber,
       });
 
       if (response.success) {
         setConnected(true);
         toast.success("اتصال به تلگرام با موفقیت انجام شد");
-        setStep(1);
+        setStep(1); // Reset to step 1 (phone number input) for future use if needed, or redirect
       } else {
         toast.error(
           response.error || "خطا در ذخیره اطلاعات. لطفاً دوباره تلاش کنید."

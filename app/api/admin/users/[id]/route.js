@@ -6,7 +6,6 @@ import { startUserServices } from "@/server/services/telegram/service-manager";
 
 export const dynamic = "force-dynamic";
 
-// GET function remains the same
 export async function GET(request, { params }) {
   try {
     const token = request.headers.get("authorization")?.split(" ")[1];
@@ -113,7 +112,7 @@ export async function PUT(request, { params }) {
     const validFieldsToUpdate = [];
     const queryParams = [];
 
-    // Fetch current user data to preserve trial_activated_at if not explicitly changed
+    // Fetch current user data to ensure we have the trial_activated_at for re-evaluation
     const existingUser = await db.get(
       "SELECT is_premium, trial_activated_at FROM users WHERE id = ?",
       [userIdToUpdate]
@@ -147,8 +146,7 @@ export async function PUT(request, { params }) {
 
     // IMPORTANT: Do NOT set trial_activated_at to null here.
     // It should only be set once by the user activating trial.
-    // If an admin wants to explicitly reset a trial, a separate action/field might be needed.
-    // For now, removing the problematic line that clears trial_activated_at.
+    // If an admin needs to explicitly reset a trial, a separate action/field might be needed.
 
     if (validFieldsToUpdate.length === 0) {
       return NextResponse.json(
@@ -175,23 +173,36 @@ export async function PUT(request, { params }) {
     }
 
     // After update, re-evaluate user services.
+    // Re-fetch updated user including trial_activated_at for correct evaluation
     const updatedUser = await db.get(
       "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
       [userIdToUpdate]
     );
 
     const now = new Date();
-    let shouldStopServices = false;
+    let shouldStopServices = false; // Flag to determine if services should be stopped due to expiry/invalid status
+    let effectiveExpiryDate = null; // The determined expiry date for current user status
+
     if (!updatedUser.is_admin) {
-        if (updatedUser.is_premium && updatedUser.premium_expiry_date && new Date(updatedUser.premium_expiry_date) < now) {
-            shouldStopServices = true; // Premium expired
+        if (updatedUser.is_premium && updatedUser.premium_expiry_date) {
+            effectiveExpiryDate = new Date(updatedUser.premium_expiry_date);
+            if (now >= effectiveExpiryDate) {
+                shouldStopServices = true; // Premium expired
+            }
         } else if (!updatedUser.is_premium && updatedUser.trial_activated_at) {
-            const tariffSettings = await db.get("SELECT normal_user_trial_days FROM tariff_settings LIMIT 1");
-            const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
-            const trialExpiryDate = new Date(updatedUser.trial_activated_at);
-            trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
-            if (now >= trialExpiryDate) {
-                shouldStopServices = true; // Trial expired
+            const trialActivatedDate = new Date(updatedUser.trial_activated_at);
+            if (isNaN(trialActivatedDate.getTime())) { // Handle invalid date from DB
+                console.warn(`Invalid trial_activated_at for user ${userIdToUpdate}: ${updatedUser.trial_activated_at}`);
+                shouldStopServices = true; // Treat as expired if trial date is invalid
+            } else {
+                const tariffSettings = await db.get("SELECT normal_user_trial_days FROM tariff_settings LIMIT 1");
+                const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
+                const calculatedTrialExpiryDate = new Date(trialActivatedDate);
+                calculatedTrialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+                effectiveExpiryDate = calculatedTrialExpiryDate; // Set effective expiry for trial
+                if (now >= effectiveExpiryDate) {
+                    shouldStopServices = true; // Trial expired
+                }
             }
         } else if (!updatedUser.is_premium && !updatedUser.trial_activated_at) {
             shouldStopServices = true; // Neither premium nor trial active (e.g., admin removed premium and trial_activated_at)
@@ -199,7 +210,7 @@ export async function PUT(request, { params }) {
     }
 
     if (shouldStopServices) {
-        console.log(`User ${userIdToUpdate} account now expired due to admin action. Stopping services.`);
+        console.log(`User ${userIdToUpdate} account now expired due to admin action or initial state. Stopping services.`);
         await startUserServices(userIdToUpdate); // This will handle stopping services if expired
     } else {
         console.log(`User ${userIdToUpdate} account status updated. Re-evaluating services.`);

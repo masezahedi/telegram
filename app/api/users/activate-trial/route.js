@@ -19,7 +19,7 @@ export async function POST(request) {
 
     const db = await openDb();
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, trial_activated_at, telegram_session FROM users WHERE id = ?", // Add telegram_session check
+      "SELECT id, is_admin, is_premium, trial_activated_at, telegram_session, premium_expiry_date FROM users WHERE id = ?", // Include premium_expiry_date
       [decoded.userId]
     );
 
@@ -38,14 +38,14 @@ export async function POST(request) {
       );
     }
 
-    // Check if trial is already activated
+    // Check if trial is already activated (trial_activated_at exists and is not null)
     if (user.trial_activated_at) {
       return NextResponse.json(
         { success: false, error: "دوره آزمایشی قبلاً برای حساب شما فعال شده است." },
         { status: 400 }
       );
     }
-    
+
     // Check if telegram is connected
     if (!user.telegram_session) {
       return NextResponse.json(
@@ -62,6 +62,7 @@ export async function POST(request) {
     const trialEnd = new Date(trialStart);
     trialEnd.setDate(trialStart.getDate() + normalUserTrialDays);
 
+    // Set trial_activated_at AND premium_expiry_date for normal users upon trial activation
     await db.run(
       "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
@@ -73,7 +74,7 @@ export async function POST(request) {
 
     // Re-fetch user data to send updated status to client
     const updatedUser = await db.get(
-      `SELECT id, name, email, telegram_session, phone_number, is_admin, 
+      `SELECT id, name, email, telegram_session, phone_number, is_admin,
               is_premium, premium_expiry_date, trial_activated_at, service_creation_count
        FROM users WHERE id = ?`,
       [decoded.userId]
@@ -88,7 +89,7 @@ export async function POST(request) {
         id: updatedUser.id,
         name: updatedUser.name,
         email: updatedUser.email,
-        telegramSession: updatedUser.telegram_session,
+        telegram_session: updatedUser.telegram_session, // Consistent casing
         phoneNumber: updatedUser.phone_number,
         isAdmin: Boolean(updatedUser.is_admin),
         isPremium: Boolean(updatedUser.is_premium),

@@ -4,8 +4,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserService } from '@/lib/services/user-service'; // Make sure UserService is imported //
-import { AuthService } from "@/lib/services/auth-service"; //
+import { UserService } from '@/lib/services/user-service';
+import { AuthService } from "@/lib/services/auth-service";
 import {
   Card,
   CardContent,
@@ -28,16 +28,16 @@ export default function Services() {
 
   const fetchUserAndSetState = async () => {
     // Always fetch fresh user data to ensure up-to-date status
-    const freshUser = await UserService.getCurrentUser(); //
-    if (freshUser?.user) { // getCurrentUser returns { user: ... }
+    const userDataResponse = await UserService.getCurrentUser();
+    if (userDataResponse?.user) {
       // Update local storage with fresh data, including tariff settings
-      localStorage.setItem("user", JSON.stringify({ //
-        ...freshUser.user,
-        isTelegramConnected: Boolean(freshUser.user.telegramSession), //
-        isAdmin: Boolean(freshUser.user.isAdmin),
-        isPremium: Boolean(freshUser.user.isPremium),
+      localStorage.setItem("user", JSON.stringify({
+        ...userDataResponse.user,
+        isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session
+        isAdmin: Boolean(userDataResponse.user.isAdmin),
+        isPremium: Boolean(userDataResponse.user.isPremium),
       }));
-      setUser(freshUser.user);
+      setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
     } else {
       toast.error("خطا در دریافت اطلاعات کاربر.");
       router.replace("/login");
@@ -48,7 +48,7 @@ export default function Services() {
     const checkAuthAndLoadUser = async () => {
       setLoading(true);
       try {
-        const isAuthenticated = await AuthService.isAuthenticated(); //
+        const isAuthenticated = await AuthService.isAuthenticated();
         if (!isAuthenticated) {
           router.replace("/login");
           return;
@@ -74,67 +74,62 @@ export default function Services() {
   };
 
   let accountStatusMessage = "";
-  let accountExpiryDateFormatted = "";
   let isAccountExpired = false;
   let alertVariant = "default";
-  
-  // Extract tariff settings from user object
-  const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15; //
 
-  // NEW: Add a flag for trial activation status
-  let isTrialActivated = Boolean(user?.trialActivatedAt); //
+  // Get tariff settings from user object (fetched from API)
+  const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15;
+  const isTelegramConnected = user?.isTelegramConnected;
 
+  // NEW: Determine the effective expiry date for the user
+  const now = new Date();
+  let effectiveExpiryDate = null;
+  let isTrialActivated = Boolean(user?.trialActivatedAt); // Check if trial was ever activated
 
   if (user && !user.isAdmin) {
-    const now = new Date();
     if (user.isPremium) {
       if (user.premiumExpiryDate) {
-        const expiry = new Date(user.premiumExpiryDate);
-        accountExpiryDateFormatted = expiry.toLocaleDateString("fa-IR", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
-        if (now >= expiry) {
-          accountStatusMessage = `اشتراک پرمیوم شما در تاریخ ${accountExpiryDateFormatted} منقضی شده است.`;
-          isAccountExpired = true;
-          alertVariant = "destructive";
-        } else {
-          accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${accountExpiryDateFormatted} معتبر است.`;
-          alertVariant = "default";
-        }
+        effectiveExpiryDate = new Date(user.premiumExpiryDate);
+        accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${effectiveExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} معتبر است.`;
       } else {
-        accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`;
-        alertVariant = "default";
+        accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`; // Or a specific default if no expiry date
       }
-    } else {
-      // Normal user
-      if (isTrialActivated) { //
+    } else { // Normal user
+      if (isTrialActivated) {
         const trialActivatedDate = new Date(user.trialActivatedAt);
-        const trialExpiry = new Date(trialActivatedDate);
-        trialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays); // Use dynamic trial days
-        
-        accountExpiryDateFormatted = trialExpiry.toLocaleDateString("fa-IR", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
-        
-        if (now >= trialExpiry) {
-          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما در تاریخ ${accountExpiryDateFormatted} به پایان رسیده است.`;
-          isAccountExpired = true;
-          alertVariant = "destructive";
-        } else {
-          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${accountExpiryDateFormatted} فعال است.`;
-          alertVariant = "default";
-        }
+        const calculatedTrialExpiry = new Date(trialActivatedDate);
+        calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+        effectiveExpiryDate = calculatedTrialExpiry;
+        accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${effectiveExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} فعال است.`;
       } else {
-        accountStatusMessage =
-          `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
-        alertVariant = "default";
+        accountStatusMessage = `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
       }
     }
+
+    // Check if account is expired based on the determined effectiveExpiryDate
+    if (effectiveExpiryDate && now >= effectiveExpiryDate) {
+        isAccountExpired = true;
+        alertVariant = "destructive";
+        accountStatusMessage = accountStatusMessage.replace("فعال است.", "منقضی شده است."); // Adjust message for expiry
+        accountStatusMessage = accountStatusMessage.replace("معتبر است.", "منقضی شده است."); // Adjust message for expiry
+    } else if (!effectiveExpiryDate && !user.isPremium && isTrialActivated) {
+        // This case should ideally not happen if trial activation always sets premiumExpiryDate
+        // But as a safeguard, if trial was activated but no expiry date, assume expired for now.
+        isAccountExpired = true;
+        alertVariant = "destructive";
+        accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما به پایان رسیده است.`;
+    } else if (!isTelegramConnected) {
+        alertVariant = "warning";
+        accountStatusMessage = `برای استفاده از سرویس‌ها، لطفاً ابتدا حساب تلگرام خود را متصل کنید.`;
+    } else if (!user.isPremium && !isTrialActivated && isTelegramConnected) {
+        // Specific message for normal user, trial not activated, but telegram connected
+        alertVariant = "info";
+        accountStatusMessage = `شما کاربر عادی هستید. برای شروع استفاده از سرویس‌ها، لطفاً مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`;
+    } else {
+        alertVariant = "default";
+    }
   }
+
 
   if (loading) {
     return (
@@ -156,15 +151,17 @@ export default function Services() {
               className={`mb-4 ${
                 isAccountExpired
                   ? "border-destructive text-destructive [&>svg]:text-destructive"
-                  : "border-info text-info [&>svg]:text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400"
+                  : (alertVariant === "info" ? "border-info text-info [&>svg]:text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400" :
+                    (alertVariant === "warning" ? "border-warning text-warning [&>svg]:text-warning dark:border-yellow-700 dark:text-yellow-300 dark:[&>svg]:text-yellow-400" :
+                      "border-background text-foreground [&>svg]:text-foreground"
+                    )
+                  )
               }`}
               variant={alertVariant}
             >
               <Info className="h-4 w-4" />
               <AlertTitle>
-                {isAccountExpired
-                  ? "مهلت استفاده به پایان رسیده"
-                  : "وضعیت اشتراک"}
+                {isAccountExpired ? "مهلت استفاده به پایان رسیده" : "وضعیت اشتراک"}
               </AlertTitle>
               <AlertDescription>
                 {accountStatusMessage}{" "}
@@ -192,14 +189,13 @@ export default function Services() {
                   key={`list-${key}`}
                   onUpdate={handleServiceListOrFormUpdate}
                   userAccountStatus={{
-                    isExpired: isAccountExpired,
+                    isExpired: isAccountExpired, // Passed as determined above
                     isPremium: user?.isPremium,
                     isAdmin: user?.isAdmin,
-                    trialActivated: isTrialActivated, // NEW: Pass trial activation status
-                    normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
-                    isTelegramConnected: user?.isTelegramConnected, // NEW: Pass Telegram connection status
-                    normalUserMaxActiveServices: user?.tariffSettings?.normalUserMaxActiveServices, //
-                    premiumUserMaxActiveServices: user?.tariffSettings?.premiumUserMaxActiveServices, //
+                    trialActivatedAt: user?.trialActivatedAt, // Pass original trial_activated_at
+                    premiumExpiryDate: user?.premiumExpiryDate, // Pass original premium_expiry_date
+                    isTelegramConnected: user?.isTelegramConnected,
+                    tariffSettings: user?.tariffSettings, // Pass tariff settings object
                   }}
                 />
               </TabsContent>
@@ -208,15 +204,13 @@ export default function Services() {
                 <ForwardingServiceForm
                   onSuccess={handleServiceListOrFormUpdate}
                   userAccountStatus={{
-                    isExpired: isAccountExpired,
+                    isExpired: isAccountExpired, // Passed as determined above
                     isPremium: user?.isPremium,
                     isAdmin: user?.isAdmin,
-                    trialActivated: isTrialActivated, // NEW: Pass trial activation status
-                    normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
-                    isTelegramConnected: user?.isTelegramConnected, // NEW: Pass Telegram connection status
-                    // Pass tariff settings to form for client-side validation messages if needed
-                    normalUserMaxChannelsPerService: user?.tariffSettings?.normalUserMaxChannelsPerService, //
-                    premiumUserMaxChannelsPerService: user?.tariffSettings?.premiumUserMaxChannelsPerService, //
+                    trialActivatedAt: user?.trialActivatedAt, // Pass original trial_activated_at
+                    premiumExpiryDate: user?.premiumExpiryDate, // Pass original premium_expiry_date
+                    isTelegramConnected: user?.isTelegramConnected,
+                    tariffSettings: user?.tariffSettings, // Pass tariff settings object
                   }}
                 />
               </TabsContent>

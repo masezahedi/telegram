@@ -40,9 +40,9 @@ import {
 } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ForwardingService } from "@/lib/services/forwarding-service"; //
-import { AuthService } from "@/lib/services/auth-service"; //
-import { SettingsService } from "@/lib/services/settings-service"; //
+import { ForwardingService } from "@/lib/services/forwarding-service";
+import { AuthService } from "@/lib/services/auth-service";
+import { SettingsService } from "@/lib/services/settings-service";
 import {
   Card,
   CardContent,
@@ -107,10 +107,9 @@ const ensureInitialArrayField = (fieldValue) => {
     return filtered.length > 0 ? filtered : [""];
   }
   if (typeof fieldValue === "string" && fieldValue.trim() !== "") {
-    // Handle case where service might have single string
     return [fieldValue];
   }
-  return [""]; // Default for new forms or empty/invalid data
+  return [""];
 };
 
 export default function ForwardingServiceForm({
@@ -120,12 +119,22 @@ export default function ForwardingServiceForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
-  // const [isTelegramConnected, setIsTelegramConnected] = useState(false); // No longer needed here, use userAccountStatus
 
-  // Extract tariff settings from userAccountStatus
-  const normalUserMaxChannelsPerService = userAccountStatus?.normalUserMaxChannelsPerService ?? 1; //
-  const premiumUserMaxChannelsPerService = userAccountStatus?.premiumUserMaxChannelsPerService ?? 10; //
-  const normalUserTrialDays = userAccountStatus?.normalUserTrialDays ?? 15; //
+  // Extract tariff settings and user status
+  const normalUserMaxChannelsPerService = userAccountStatus?.tariffSettings?.normalUserMaxChannelsPerService ?? 1;
+  const premiumUserMaxChannelsPerService = userAccountStatus?.tariffSettings?.premiumUserMaxChannelsPerService ?? 10;
+  const normalUserTrialDays = userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
+
+  const isTelegramConnected = userAccountStatus?.isTelegramConnected;
+  const isAdmin = userAccountStatus?.isAdmin;
+  const isPremium = userAccountStatus?.isPremium;
+  const trialActivated = userAccountStatus?.trialActivated; // This flag comes from page.js now
+
+  // Determine if the user's account is currently expired based on premium_expiry_date
+  const now = new Date();
+  const isAccountExpired = userAccountStatus?.premiumExpiryDate
+    ? (new Date(userAccountStatus.premiumExpiryDate) < now)
+    : (!isPremium && trialActivated && (!userAccountStatus.premiumExpiryDate || new Date(userAccountStatus.premiumExpiryDate) < now));
 
 
   const form = useForm({
@@ -192,7 +201,7 @@ export default function ForwardingServiceForm({
 
   useEffect(() => {
     const checkRequirements = async () => {
-      const settings = await SettingsService.getSettings(); //
+      const settings = await SettingsService.getSettings();
       setHasGeminiKey(Boolean(settings?.gemini_api_key));
     };
     checkRequirements();
@@ -204,10 +213,9 @@ export default function ForwardingServiceForm({
 
     if (isCopyService) {
       // For "copy" type, ensure exactly one source and one target channel field.
-      // Use the first existing value if available, otherwise an empty string.
       const firstSource = currentSourceChannels?.[0] || "";
       const firstTarget = currentTargetChannels?.[0] || "";
-      replaceSource([firstSource]); // replace expects an array of new field values
+      replaceSource([firstSource]);
       replaceTarget([firstTarget]);
     } else {
       // For "forward" type, if fields are empty (e.g., after switching from copy and deleting), ensure at least one.
@@ -227,11 +235,11 @@ export default function ForwardingServiceForm({
     appendTarget,
     sourceFields.length,
     targetFields.length,
-  ]); // Added sourceFields.length and targetFields.length
+  ]);
 
   const onSubmit = async (values) => {
     // NEW LOGIC: Check Telegram connection
-    if (!userAccountStatus?.isTelegramConnected) {
+    if (!isTelegramConnected) {
       toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
       return;
     }
@@ -245,26 +253,19 @@ export default function ForwardingServiceForm({
 
     // NEW LOGIC: Prevent creation/editing if user account is expired or trial not activated
     const isNewService = !service?.id;
-    if (
-      !userAccountStatus?.isAdmin && // Not an admin
-      (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) && // Not premium AND trial expired
-      isNewService // Only block new service creation for expired normal users
-    ) {
-      toast.error(
-        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد یا ویرایش کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
-      );
-      return;
-    }
-    if (
-      isNewService && // Only for new services
-      !userAccountStatus?.isAdmin && // Not an admin
-      !userAccountStatus?.isPremium && // Not premium
-      !userAccountStatus?.trialActivated // Trial not yet activated
-    ) {
-      toast.error(
-        `لطفاً برای شروع ایجاد سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید. (در بخش لیست سرویس‌ها)`
-      );
-      return;
+    if (!isAdmin) {
+      if (isAccountExpired && isNewService) { // Only block new service creation for expired non-admins
+        toast.error(
+          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
+        );
+        return;
+      }
+      if (!isPremium && !trialActivated && isNewService) { // Only for new services if normal user and trial not activated
+        toast.error(
+          `لطفاً برای شروع ایجاد سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید. (در بخش لیست سرویس‌ها)`
+        );
+        return;
+      }
     }
 
     let finalSourceChannels = values.sourceChannels
@@ -295,8 +296,8 @@ export default function ForwardingServiceForm({
     }
 
     // Client-side channel count validation based on tariff settings
-    if (!userAccountStatus?.isAdmin) {
-      const currentMaxChannels = userAccountStatus?.isPremium
+    if (!isAdmin) {
+      const currentMaxChannels = isPremium
         ? premiumUserMaxChannelsPerService
         : normalUserMaxChannelsPerService;
 
@@ -304,10 +305,9 @@ export default function ForwardingServiceForm({
         finalSourceChannels.length > currentMaxChannels ||
         finalTargetChannels.length > currentMaxChannels
       ) {
-        const role = userAccountStatus?.isPremium ? "پرمیوم" : "عادی";
+        const role = isPremium ? "پرمیوم" : "عادی";
         const errorMsg = `کاربران ${role} حداکثر می‌توانند ${currentMaxChannels} کانال مبدأ و ${currentMaxChannels} کانال مقصد تعریف کنند.`;
         toast.error(errorMsg);
-        // Set errors for the fields if needed, though toast might be sufficient for general user feedback
         form.setError("sourceChannels.0", { type: "manual", message: errorMsg });
         form.setError("targetChannels.0", { type: "manual", message: errorMsg });
         return;
@@ -354,8 +354,8 @@ export default function ForwardingServiceForm({
       };
 
       const result = service?.id
-        ? await ForwardingService.updateService(service.id, cleanedValues) //
-        : await ForwardingService.createService(cleanedValues); //
+        ? await ForwardingService.updateService(service.id, cleanedValues)
+        : await ForwardingService.createService(cleanedValues);
 
       if (result.success) {
         toast.success(
@@ -382,7 +382,7 @@ export default function ForwardingServiceForm({
         toast.error(result.error || "خطا در عملیات سرویس");
       }
     } catch (error) {
-      console.error("Service operation error:", error); //
+      console.error("Service operation error:", error);
       toast.error("خطا در عملیات سرویس");
     } finally {
       setLoading(false);
@@ -393,15 +393,15 @@ export default function ForwardingServiceForm({
   const startFromIdWatched = form.watch("startFromId");
 
   // Determine channel limits message
-  const channelLimitMessage = userAccountStatus?.isAdmin
+  const channelLimitMessage = isAdmin
     ? "مدیران محدودیتی در تعداد کانال ندارند."
-    : userAccountStatus?.isPremium
+    : isPremium
       ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`
       : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
 
 
   // NEW LOGIC: Conditional rendering based on Telegram connection and trial status
-  if (!userAccountStatus?.isTelegramConnected) {
+  if (!isTelegramConnected) {
     return (
       <div className="text-center py-8">
         <p className="text-destructive mb-4">
@@ -417,36 +417,16 @@ export default function ForwardingServiceForm({
     );
   }
 
-  // NEW LOGIC: Block new service creation if trial is expired
-  if (
-    !service?.id && // This is a new service, not an edit
-    !userAccountStatus?.isAdmin && // Not an admin
-    (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) // Not premium AND trial expired
-  ) {
+  // NEW LOGIC: Block new service creation if account is expired or trial not activated
+  if (!service?.id && !isAdmin && (isAccountExpired || !trialActivated)) {
     return (
       <Alert variant="destructive">
         <Info className="h-4 w-4" />
-        <AlertTitle>مهلت استفاده به پایان رسیده</AlertTitle>
+        <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
         <AlertDescription>
-          مهلت استفاده شما به پایان رسیده است. برای ایجاد سرویس جدید،
-          لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  // NEW LOGIC: Block new service creation if trial not activated
-  if (
-    !service?.id && // This is a new service, not an edit
-    !userAccountStatus?.isAdmin && // Not an admin
-    !userAccountStatus?.isPremium && // Not premium
-    !userAccountStatus?.trialActivated // Trial not yet activated
-  ) {
-    return (
-      <Alert variant="warning">
-        <Info className="h-4 w-4" />
-        <AlertTitle>فعال‌سازی مهلت آزمایشی</AlertTitle>
-        <AlertDescription>
-          برای شروع ایجاد سرویس، ابتدا باید مهلت {normalUserTrialDays} روزه آزمایشی خود را فعال کنید. لطفاً به بخش "لیست سرویس‌ها" مراجعه کرده و روی دکمه "فعال‌سازی مهلت آزمایشی" کلیک کنید.
+          امکان ایجاد سرویس جدید وجود ندارد. لطفاً{" "}
+          {!isPremium && !trialActivated ? `مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید` : ""}
+          {isAccountExpired ? " یا اشتراک خود را ارتقا دهید." : "."}
         </AlertDescription>
       </Alert>
     );
@@ -724,6 +704,7 @@ export default function ForwardingServiceForm({
                     <FormControl>
                       <Switch
                         dir="ltr"
+                        id="copyHistory-switch"
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
@@ -1013,10 +994,7 @@ export default function ForwardingServiceForm({
             className="w-full sm:w-auto"
             disabled={
               loading ||
-              (!service?.id && !userAccountStatus?.isAdmin && // Not admin, and this is a new service
-                (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) || // Not premium and expired
-                (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) // Not premium and trial not activated
-              )
+              (!service?.id && !isAdmin && (isAccountExpired || !trialActivated))
             }
           >
             {loading

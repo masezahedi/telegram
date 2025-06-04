@@ -432,44 +432,43 @@ export default function UserDetails({ params }) {
                       )
                     : "-";
 
-                  // Use tariff settings for trial expiry calculation if available in user object
                   const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15;
 
-                  // Logic for service status based on user's overall account status
                   const now = new Date();
                   let isUserAccountExpired = false;
+                  let effectiveExpiryDate = null;
 
+                  // Determine effective expiry date based on premium/trial status
                   if (userData.is_premium) {
-                      if (userData.premium_expiry_date && new Date(userData.premium_expiry_date) < now) {
-                          isUserAccountExpired = true;
+                      if (userData.premium_expiry_date) {
+                          effectiveExpiryDate = new Date(userData.premium_expiry_date);
                       }
                   } else { // Normal user
                       if (userData.trial_activated_at) {
                           const trialActivatedDate = new Date(userData.trial_activated_at);
-                          const trialExpiryDate = new Date(trialActivatedDate);
-                          trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
-                          if (now >= trialExpiryDate) {
-                              isUserAccountExpired = true;
-                          }
-                      } else {
-                          // Trial not activated means user cannot have active services unless they are premium.
-                          isUserAccountExpired = true; // Effectively expired for service activation
+                          const calculatedTrialExpiry = new Date(trialActivatedDate);
+                          calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+                          effectiveExpiryDate = calculatedTrialExpiry;
                       }
+                  }
+
+                  // Check if effective expiry date is in the past
+                  if (effectiveExpiryDate && now >= effectiveExpiryDate) {
+                      isUserAccountExpired = true;
+                  } else if (!effectiveExpiryDate && !userData.is_premium && !userData.trial_activated_at) {
+                      // No premium and no trial activated means effectively expired for service use
+                      isUserAccountExpired = true;
                   }
 
                   if (isUserAccountExpired) {
                       serviceStatusMessage = "منقضی شده (حساب کاربری)";
                   } else if (userData.is_premium) {
-                      serviceStatusMessage = "فعال (پرمیوم)";
+                      serviceStatusMessage = `فعال (پرمیوم تا ${effectiveExpiryDate?.toLocaleDateString("fa-IR") || "بی‌نهایت"})`;
                   } else if (userData.trial_activated_at) {
-                      const trialActivatedDate = new Date(userData.trial_activated_at);
-                      const trialExpiryDate = new Date(trialActivatedDate);
-                      trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
-                      serviceStatusMessage = `فعال (تا ${trialExpiryDate.toLocaleDateString("fa-IR")})`;
+                      serviceStatusMessage = `فعال (تست تا ${effectiveExpiryDate?.toLocaleDateString("fa-IR")})`;
                   } else {
                     serviceStatusMessage = "غیرفعال (نیاز به فعال‌سازی تریال)";
                   }
-
 
                   return (
                     <Card key={service.id}>
@@ -533,7 +532,6 @@ export default function UserDetails({ params }) {
                               </div>
                             </div>
                           </div>
-                          {/* Display Search & Replace Rules */}
                           {service.search_replace_rules && service.search_replace_rules.length > 0 && (
                             <div className="mt-2">
                               <Label className="text-xs text-muted-foreground">قوانین جستجو/جایگزینی:</Label>

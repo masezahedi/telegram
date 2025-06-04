@@ -47,6 +47,9 @@ export async function POST(request) {
       expiresIn: "7d",
     });
 
+    // Fetch tariff settings here as well, to include in the user object
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+
     return NextResponse.json({
       success: true,
       token,
@@ -54,13 +57,22 @@ export async function POST(request) {
         id: user.id,
         name: user.name,
         email: user.email,
-        telegramSession: user.telegram_session,
+        telegram_session: user.telegram_session, // Consistent casing
         phoneNumber: user.phone_number,
         is_admin: Boolean(user.is_admin),
         is_premium: Boolean(user.is_premium),
-        premium_expiry_date: user.premium_expiry_date, // Represents overall account expiry
-        trial_activated_at: user.trial_activated_at, // New
+        premium_expiry_date: user.premium_expiry_date,
+        trial_activated_at: user.trial_activated_at,
         service_creation_count: user.service_creation_count,
+        // Include tariff settings
+        tariffSettings: {
+          normalUserTrialDays: tariffSettings?.normal_user_trial_days ?? 15,
+          premiumUserDefaultDays: tariffSettings?.premium_user_default_days ?? 30,
+          normalUserMaxActiveServices: tariffSettings?.normal_user_max_active_services ?? 1,
+          premiumUserMaxActiveServices: tariffSettings?.premium_user_max_active_services ?? 5,
+          normalUserMaxChannelsPerService: tariffSettings?.normal_user_max_channels_per_service ?? 1,
+          premiumUserMaxChannelsPerService: tariffSettings?.premium_user_max_channels_per_channel ?? 10, // Corrected typo
+        },
       },
     });
   } catch (error) {
