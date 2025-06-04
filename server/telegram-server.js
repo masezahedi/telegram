@@ -100,6 +100,7 @@ app.post("/signIn", async (req, res) => {
       await client.connect();
     }
 
+    // Attempt to sign in
     const result = await client.invoke(
       new Api.auth.SignIn({
         phoneNumber,
@@ -109,7 +110,8 @@ app.post("/signIn", async (req, res) => {
     );
 
     const stringSession = client.session.save();
-    activeClients.delete(phoneNumber);
+    // Do NOT delete client here yet, wait until session is saved in Next.js backend
+    // activeClients.delete(phoneNumber);
 
     res.json({ success: true, stringSession });
   } catch (err) {
@@ -150,7 +152,8 @@ app.post("/checkPassword", async (req, res) => {
     );
 
     const stringSession = client.session.save();
-    activeClients.delete(phoneNumber);
+    // Do NOT delete client here yet, wait until session is saved in Next.js backend
+    // activeClients.delete(phoneNumber);
 
     res.json({
       success: true,
