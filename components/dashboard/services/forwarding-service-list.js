@@ -1,10 +1,11 @@
+// components/dashboard/services/forwarding-service-list.js
 "use client";
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react"; // Eye removed as it wasn't used
+import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -32,6 +33,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [showForm, setShowForm] = useState(false);
 
   // Extract tariff settings from userAccountStatus
+  const normalUserTrialDays = userAccountStatus?.normalUserTrialDays ?? 15;
   const normalUserMaxActiveServices = userAccountStatus?.normalUserMaxActiveServices ?? 1;
   const premiumUserMaxActiveServices = userAccountStatus?.premiumUserMaxActiveServices ?? 5;
 
@@ -39,10 +41,10 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const loadServices = async () => {
     setLoading(true);
     try {
-      const data = await ForwardingService.getServices();
+      const data = await ForwardingService.getServices(); //
       setServices(data);
     } catch (error) {
-      console.error("Load services error:", error);
+      console.error("Load services error:", error); //
       toast.error("خطا در بارگذاری سرویس‌ها");
     } finally {
       setLoading(false);
@@ -54,17 +56,26 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   }, []);
 
   const handleStatusChange = async (id, newIsActiveStatus) => {
-    if (
-      newIsActiveStatus &&
-      userAccountStatus?.isExpired &&
-      !userAccountStatus?.isAdmin
-    ) {
-      toast.error(
-        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد."
-      );
-      await loadServices();
-      return;
+    // NEW LOGIC: Block activation if account is expired or trial not activated
+    if (newIsActiveStatus) { // Only check when trying to ACTIVATE a service
+      if (!userAccountStatus?.isAdmin) { // Admins bypass these checks
+        if (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) {
+          toast.error(
+            "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد. لطفاً اشتراک خود را ارتقا دهید."
+          );
+          await loadServices(); // Reload to revert UI if toast prevents action
+          return;
+        }
+        if (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) {
+          toast.error(
+            `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
+          );
+          await loadServices();
+          return;
+        }
+      }
     }
+
     // Check active service limit if activating
     if (newIsActiveStatus && !userAccountStatus?.isAdmin) {
       const currentActiveServices = services.filter(s => s.is_active).length;
@@ -82,7 +93,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     }
 
     try {
-      const result = await ForwardingService.updateServiceStatus(
+      const result = await ForwardingService.updateServiceStatus( //
         id,
         newIsActiveStatus
       );
@@ -95,11 +106,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
         );
         onUpdate?.();
       } else {
-        toast.error(result.error || "خطا در تغییر وضعیت سرویس");
+        toast.error(result.error || "خطا در تغییر وضعیت سرویس"); //
         await loadServices();
       }
     } catch (error) {
-      console.error("Update service status error:", error);
+      console.error("Update service status error:", error); //
       toast.error("خطا در تغییر وضعیت سرویس");
       await loadServices();
     }
@@ -113,31 +124,44 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     )
       return;
     try {
-      const result = await ForwardingService.deleteService(id);
+      const result = await ForwardingService.deleteService(id); //
       if (result.success) {
         setServices(services.filter((service) => service.id !== id));
         toast.success("سرویس با موفقیت حذف شد");
         onUpdate?.();
       } else {
-        toast.error(result.error || "خطا در حذف سرویس");
+        toast.error(result.error || "خطا در حذف سرویس"); //
       }
     } catch (error) {
-      console.error("Delete service error:", error);
+      console.error("Delete service error:", error); //
       toast.error("خطا در حذف سرویس");
     }
   };
 
   const handleEdit = (service) => {
+    // NEW LOGIC: Block editing if account is expired and not premium/admin
     if (
       userAccountStatus?.isExpired &&
       !userAccountStatus?.isPremium &&
       !userAccountStatus?.isAdmin
     ) {
       toast.error(
-        "مهلت استفاده شما به پایان رسیده و امکان ویرایش سرویس وجود ندارد."
+        "مهلت استفاده شما به پایان رسیده و امکان ویرایش سرویس وجود ندارد. لطفاً اشتراک خود را ارتقا دهید."
       );
       return;
     }
+    // NEW LOGIC: Block editing if trial not activated
+    if (
+      !userAccountStatus?.isAdmin &&
+      !userAccountStatus?.isPremium &&
+      !userAccountStatus?.trialActivated
+    ) {
+      toast.error(
+        `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
+      );
+      return;
+    }
+
     setEditingService(service);
     setShowForm(true);
   };
@@ -148,6 +172,42 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     loadServices();
     onUpdate?.();
   };
+
+  // NEW LOGIC: Handle trial activation
+  const handleActivateTrial = async () => {
+    setLoading(true);
+    try {
+      // Find the first inactive service, or create a dummy one if none exists, to trigger trial
+      const serviceToActivate = services.find(s => !s.is_active);
+      if (serviceToActivate) {
+        // Activate an existing inactive service to trigger trial
+        await handleStatusChange(serviceToActivate.id, true);
+      } else {
+        // If no inactive service, create a dummy one to trigger trial activation
+        // This is a workaround to trigger the backend trial activation logic
+        const dummyServiceData = {
+          name: "سرویس آزمایشی (جهت فعالسازی تریال)",
+          type: "forward",
+          sourceChannels: ["@testchannel"], // Dummy channel, replace with something meaningful if possible
+          targetChannels: ["@mychannel"],    // Dummy channel
+          is_active: true,
+        };
+        const result = await ForwardingService.createService(dummyServiceData); //
+        if (result.success) {
+          toast.success(`مهلت ${normalUserTrialDays} روزه آزمایشی شما فعال شد!`);
+          onUpdate?.(); // Trigger user state update
+        } else {
+          toast.error(result.error || "خطا در فعال‌سازی مهلت آزمایشی.");
+        }
+      }
+    } catch (error) {
+      console.error("Error activating trial:", error);
+      toast.error("خطا در فعال‌سازی مهلت آزمایشی.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   if (loading) {
     return (
@@ -183,17 +243,52 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     );
   }
 
+  // Determine if "Create New Service" button should be disabled
   const disableCreateNew =
-    userAccountStatus?.isExpired &&
+    !userAccountStatus?.isAdmin && // Not an admin
+    (
+      (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) || // Not premium AND trial expired
+      (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) // Not premium AND trial not activated
+    );
+
+  // Determine if trial activation button should be shown
+  const showTrialActivationButton =
+    !userAccountStatus?.isAdmin &&
     !userAccountStatus?.isPremium &&
-    !userAccountStatus?.isAdmin;
+    !userAccountStatus?.trialActivated; // Only show if normal user and trial hasn't started
+
+  // Determine if switch should be disabled for limit reasons
+  const disableSwitchDueToLimits = (serviceStatus) => {
+    if (userAccountStatus?.isAdmin) return false; // Admins always enabled
+
+    if (!serviceStatus.is_active) { // If trying to activate an inactive service
+      const currentActiveServices = services.filter(s => s.is_active && s.id !== serviceStatus.id).length; // Exclude current service if it's already active
+      const maxActiveServices = userAccountStatus?.isPremium
+        ? premiumUserMaxActiveServices
+        : normalUserMaxActiveServices;
+
+      if (currentActiveServices >= maxActiveServices) {
+        return true; // Disable if max active services reached
+      }
+    }
+    return false;
+  };
+
 
   return (
     <TooltipProvider delayDuration={100}>
       <div className="space-y-4">
-        <div className="flex justify-start">
-          {" "}
-          {/* دکمه در سمت راست در RTL */}
+        <div className="flex justify-end gap-x-2">
+          {showTrialActivationButton && (
+            <Button
+              onClick={handleActivateTrial}
+              className="bg-info hover:bg-info/90 text-info-foreground gap-x-2"
+              disabled={loading}
+            >
+              <Info className="h-4 w-4" />
+              {loading ? "در حال فعال‌سازی..." : `فعال‌سازی مهلت ${normalUserTrialDays} روزه`}
+            </Button>
+          )}
           <Button
             onClick={() => setShowForm(true)}
             className="gap-x-2"
@@ -203,13 +298,13 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
             ایجاد سرویس جدید
           </Button>
         </div>
+
         {disableCreateNew && (
           <Alert variant="destructive" className="mt-2">
             <Info className="h-4 w-4" />
             <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
             <AlertDescription>
-              امکان ایجاد سرویس جدید وجود ندارد. مهلت استفاده شما به پایان رسیده
-              است.
+              امکان ایجاد سرویس جدید وجود ندارد. لطفاً ابتدا مهلت آزمایشی خود را فعال کنید یا اشتراک خود را ارتقا دهید.
             </AlertDescription>
           </Alert>
         )}
@@ -228,13 +323,9 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
               </TableCaption>
               <TableHeader>
                 <TableRow>
-                  {/* ترتیب ستون‌ها برای RTL: عملیات (چپ‌ترین در نمایش LTR) باید اول تعریف شود اگر می‌خواهید راست‌ترین باشد */}
-                  {/* یا اینکه ترتیب فعلی را حفظ کنید و مطمئن شوید محتوا text-right است */}
-                  {/* ترتیب فعلی با فرض اینکه dir="rtl" کار خودش را می‌کند: */}
                   <TableHead className="text-right w-[200px] ps-4">
                     نام سرویس
-                  </TableHead>{" "}
-                  {/* ps-4 for padding-start */}
+                  </TableHead>
                   <TableHead className="text-right w-[150px]">
                     نوع سرویس
                   </TableHead>
@@ -243,8 +334,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                   <TableHead className="text-right w-[100px]">وضعیت</TableHead>
                   <TableHead className="text-center w-[120px] pe-4">
                     عملیات
-                  </TableHead>{" "}
-                  {/* pe-4 for padding-end */}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -277,7 +367,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                         </TooltipTrigger>
                         <TooltipContent className="text-right">
                           {" "}
-                          {/* اطمینان از راست‌چین بودن محتوای تولتیپ */}
                           {(Array.isArray(service.source_channels)
                             ? service.source_channels
                             : []
@@ -313,15 +402,23 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                         onCheckedChange={(checked) =>
                           handleStatusChange(service.id, checked)
                         }
+                        // Disable if:
+                        // 1. Account is expired AND not premium AND not admin (unless service is already active)
+                        // 2. Account is not premium AND trial not activated (unless service is already active)
+                        // 3. Max active services limit reached for current user type
                         disabled={
                           (userAccountStatus?.isExpired &&
-                          !service.is_active &&
-                          !userAccountStatus?.isAdmin) ||
-                          (!userAccountStatus?.isAdmin && !userAccountStatus?.isPremium && services.filter(s => s.is_active).length >= (normalUserMaxActiveServices) && !service.is_active) || // Disable if normal user and max active services reached
-                          (!userAccountStatus?.isAdmin && userAccountStatus?.isPremium && services.filter(s => s.is_active).length >= (premiumUserMaxActiveServices) && !service.is_active) // Disable if premium user and max active services reached
+                          !userAccountStatus?.isPremium &&
+                          !userAccountStatus?.isAdmin &&
+                          !service.is_active) ||
+                          (!userAccountStatus?.isAdmin &&
+                          !userAccountStatus?.isPremium &&
+                          !userAccountStatus?.trialActivated &&
+                          !service.is_active) ||
+                          disableSwitchDueToLimits(service)
                         }
                         aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
-                        dir="ltr" // سوییچ معمولا ظاهر LTR دارد
+                        dir="ltr"
                       />
                     </TableCell>
                     <TableCell className="text-center py-3 pe-4">
@@ -332,10 +429,16 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleEdit(service)}
+                              // Disable if:
+                              // 1. Account is expired AND not premium AND not admin
+                              // 2. Account is not premium AND trial not activated
                               disabled={
-                                userAccountStatus?.isExpired &&
+                                (userAccountStatus?.isExpired &&
                                 !userAccountStatus?.isPremium &&
-                                !userAccountStatus?.isAdmin
+                                !userAccountStatus?.isAdmin) ||
+                                (!userAccountStatus?.isAdmin &&
+                                !userAccountStatus?.isPremium &&
+                                !userAccountStatus?.trialActivated)
                               }
                             >
                               <Pencil className="h-4 w-4" />

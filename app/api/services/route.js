@@ -1,68 +1,69 @@
+// app/api/services/route.js
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
 import {
   stopService,
   startUserServices,
-} from "@/server/services/telegram/service-manager";
+} from "@/server/services/telegram/service-manager"; //
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
-    const db = await openDb();
+    const db = await openDb(); //
     const servicesFromDb = await db.all(
-      "SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC",
+      "SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC", //
       [decoded.userId]
     );
 
     return NextResponse.json({
-      success: true,
-      services: servicesFromDb.map((service) => ({
+      success: true, //
+      services: servicesFromDb.map((service) => ({ //
         ...service,
-        source_channels: JSON.parse(service.source_channels || "[]"),
-        target_channels: JSON.parse(service.target_channels || "[]"),
-        search_replace_rules: JSON.parse(service.search_replace_rules || "[]"),
-        is_active: Boolean(service.is_active),
-        useAI: Boolean(service.prompt_template),
-        type: service.type || "forward",
-        copy_history: Boolean(service.copy_history),
-        history_limit: service.history_limit ?? 100,
-        history_direction: service.history_direction ?? "newest",
-        start_from_id: service.start_from_id,
-        copy_direction: service.copy_direction ?? "before",
+        source_channels: JSON.parse(service.source_channels || "[]"), //
+        target_channels: JSON.parse(service.target_channels || "[]"), //
+        search_replace_rules: JSON.parse(service.search_replace_rules || "[]"), //
+        is_active: Boolean(service.is_active), //
+        useAI: Boolean(service.prompt_template), //
+        type: service.type || "forward", //
+        copy_history: Boolean(service.copy_history), //
+        history_limit: service.history_limit ?? 100, //
+        history_direction: service.history_direction ?? "newest", //
+        start_from_id: service.start_from_id, //
+        copy_direction: service.copy_direction ?? "before", //
         service_activated_at: service.service_activated_at, // اطمینان از ارسال این فیلد
       })),
     });
   } catch (error) {
-    console.error("Get services error:", error);
+    console.error("Get services error:", error); //
     return NextResponse.json(
       { success: false, error: "خطا در دریافت سرویس‌ها" },
       { status: 500 }
-    );
+    ); //
   }
 }
 
 export async function POST(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
     const {
@@ -87,9 +88,9 @@ export async function POST(request) {
       );
     }
 
-    const db = await openDb();
+    const db = await openDb(); //
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
       [decoded.userId]
     );
 
@@ -120,14 +121,13 @@ export async function POST(request) {
     }
 
     // Fetch tariff settings
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
-    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
-    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10;
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
+    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1; //
 
     // --- Start of Limit Checks for Creating Service ---
     if (!user.is_admin) {
       // Check 1: Overall account/trial expiry for creating new services
-      // If user is not premium, and their trial has started AND expired
+      // اگر کاربر پرمیوم نیست، و دوره آزمایشی شروع شده است AND منقضی شده است.
       if (
         !user.is_premium &&
         user.trial_activated_at &&
@@ -144,34 +144,19 @@ export async function POST(request) {
         );
       }
 
-      // Tier-based limits on channel count
-      if (user.is_premium) {
-        if (
-          sourceChannels.filter(Boolean).length > premiumUserMaxChannelsPerService ||
-          targetChannels.filter(Boolean).length > premiumUserMaxChannelsPerService
-        ) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `کاربران پرمیوم حداکثر می‌توانند ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
-            },
-            { status: 403 }
-          );
-        }
-      } else {
-        // Normal User
-        if (
-          sourceChannels.filter(Boolean).length > normalUserMaxChannelsPerService ||
-          targetChannels.filter(Boolean).length > normalUserMaxChannelsPerService
-        ) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `کاربران عادی فقط می‌توانند ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
-            },
-            { status: 403 }
-          );
-        }
+      // Tier-based limits on channel count (only normal user has a limit here for channel count)
+      if (
+        !user.is_premium && // فقط برای کاربر عادی این محدودیت اعمال می‌شود
+        (sourceChannels.filter(Boolean).length > normalUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length > normalUserMaxChannelsPerService)
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `کاربران عادی فقط می‌توانند ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`,
+          },
+          { status: 403 }
+        );
       }
     }
     // --- End of Limit Checks for Creating Service ---
@@ -204,32 +189,54 @@ export async function POST(request) {
       ]
     );
 
+    // After successfully creating a service, if it's a normal user and trial hasn't started, initiate trial
+    if (
+      !user.is_admin &&
+      !user.is_premium &&
+      !user.trial_activated_at
+    ) {
+      const trialStart = new Date();
+      const trialEnd = new Date(trialStart);
+      trialEnd.setDate(trialStart.getDate() + (tariffSettings?.normal_user_trial_days ?? 15)); //
+
+      await db.run(
+        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
+        [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
+      );
+      console.log(
+        `Normal user ${
+          decoded.userId
+        } trial started. Expires: ${trialEnd.toISOString()}. Trial activated at: ${trialStart.toISOString()}`
+      );
+    }
+
+
     return NextResponse.json({ success: true, serviceId: serviceId });
   } catch (error) {
-    console.error("Create service error:", error);
+    console.error("Create service error:", error); //
     return NextResponse.json(
       { success: false, error: "خطا در ایجاد سرویس" },
       { status: 500 }
-    );
+    ); //
   }
 }
 
 export async function PUT(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
     const { id: serviceIdToUpdate, isActive } = await request.json();
-    const db = await openDb();
+    const db = await openDb(); //
     const user = await db.get(
-      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?",
+      "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at FROM users WHERE id = ?", //
       [decoded.userId]
     );
 
@@ -241,7 +248,7 @@ export async function PUT(request) {
     }
 
     const serviceToUpdate = await db.get(
-      "SELECT * FROM forwarding_services WHERE id = ? AND user_id = ?",
+      "SELECT * FROM forwarding_services WHERE id = ? AND user_id = ?", //
       [serviceIdToUpdate, decoded.userId]
     );
 
@@ -257,12 +264,11 @@ export async function PUT(request) {
     let userIsEffectivelyPremium = false;
 
     // Fetch tariff settings
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
-    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
-    const premiumUserDefaultDays = tariffSettings?.premium_user_default_days ?? 30;
-    const normalUserMaxActiveServices = tariffSettings?.normal_user_max_active_services ?? 1;
-    const premiumUserMaxActiveServices = tariffSettings?.premium_user_max_active_services ?? 5;
-    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
+    const premiumUserMaxActiveServices = tariffSettings?.premium_user_max_active_services ?? 5; //
+    const normalUserMaxActiveServices = tariffSettings?.normal_user_max_active_services ?? 1; //
+    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1; //
 
     if (user.is_admin) {
       userIsEffectivelyPremium = true; // Admins have no restrictions
@@ -280,13 +286,15 @@ export async function PUT(request) {
       // Normal user whose trial has started.
       const trialActivatedDate = new Date(user.trial_activated_at);
       const calculatedTrialExpiry = new Date(trialActivatedDate);
-      calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+      calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays); //
       effectiveAccountExpiryDate = calculatedTrialExpiry;
       userIsEffectivelyPremium = false;
     } else if (!user.is_premium && !user.trial_activated_at) {
       // Normal user, trial not yet started. They can activate one service to start trial.
+      // In this specific case, we'll allow activation to start the trial, and the logic below will set trial_activated_at.
       userIsEffectivelyPremium = false;
     }
+
 
     if (isActive) {
       // Only apply these checks if trying to ACTIVATE a service
@@ -296,21 +304,21 @@ export async function PUT(request) {
           // This case means their premium or trial has definitely expired.
           // The background job should handle deactivating services, but this is a safeguard.
           await db.run(
-            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND is_active = 1",
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND is_active = 1", //
             [decoded.userId]
           );
           if (user.is_premium) {
             // If they were premium and expired, mark as not premium
             await db.run(
-              "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+              "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
               [decoded.userId]
             );
           }
           for (const svc of await db.all(
-            "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+            "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1", //
             [decoded.userId]
           )) {
-            await stopService(decoded.userId, svc.id);
+            await stopService(decoded.userId, svc.id); //
           }
           return NextResponse.json(
             {
@@ -323,10 +331,10 @@ export async function PUT(request) {
         }
 
         // Check 2: Tier-based active service limits
-        if (userIsEffectivelyPremium && !user.is_admin) {
+        if (userIsEffectivelyPremium) {
           // Premium (non-admin) user
           const activeServicesCount = await db.get(
-            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
+            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?", //
             [decoded.userId, serviceIdToUpdate]
           );
           if (activeServicesCount.count >= premiumUserMaxActiveServices) {
@@ -339,10 +347,10 @@ export async function PUT(request) {
               { status: 403 }
             );
           }
-        } else if (!userIsEffectivelyPremium && !user.is_admin) {
+        } else {
           // Normal User (or expired premium behaving as normal)
           const activeServicesCount = await db.get(
-            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?",
+            "SELECT COUNT(*) as count FROM forwarding_services WHERE user_id = ? AND is_active = 1 AND id != ?", //
             [decoded.userId, serviceIdToUpdate]
           );
           if (activeServicesCount.count >= normalUserMaxActiveServices) {
@@ -378,6 +386,7 @@ export async function PUT(request) {
       }
     }
 
+
     let updateServiceSQL = `UPDATE forwarding_services SET is_active = ?, updated_at = CURRENT_TIMESTAMP`;
     const updateServiceParams = [isActive ? 1 : 0];
 
@@ -404,10 +413,10 @@ export async function PUT(request) {
     ) {
       const trialStart = new Date();
       const trialEnd = new Date(trialStart);
-      trialEnd.setDate(trialStart.getDate() + normalUserTrialDays);
+      trialEnd.setDate(trialStart.getDate() + normalUserTrialDays); //
 
       await db.run(
-        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE users SET trial_activated_at = ?, premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
         [trialStart.toISOString(), trialEnd.toISOString(), decoded.userId]
       );
       console.log(
@@ -422,63 +431,63 @@ export async function PUT(request) {
         console.log(
           `🟢 Activating service ${serviceIdToUpdate} for user ${decoded.userId}`
         );
-        await startUserServices(decoded.userId);
+        await startUserServices(decoded.userId); //
       } else {
         console.log(
           `🔴 Deactivating service ${serviceIdToUpdate} for user ${decoded.userId}`
         );
-        await stopService(decoded.userId, serviceIdToUpdate);
+        await stopService(decoded.userId, serviceIdToUpdate); //
       }
     } catch (serviceError) {
-      console.error("Service control error:", serviceError);
+      console.error("Service control error:", serviceError); //
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Update service status error:", error);
+    console.error("Update service status error:", error); //
     return NextResponse.json(
       { success: false, error: "خطا در بروزرسانی وضعیت سرویس" },
       { status: 500 }
-    );
+    ); //
   }
 }
 
 export async function DELETE(request) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
     const { id } = await request.json();
-    const db = await openDb();
+    const db = await openDb(); //
 
     // Note: Deleting a service does not reset trial_activated_at or premium_expiry_date for normal users.
     // The 15-day window is for the user, not per service.
 
     try {
-      console.log(`🗑️ Stopping service ${id} before deletion`);
-      await stopService(decoded.userId, id);
+      console.log(`🗑️ Stopping service ${id} before deletion`); //
+      await stopService(decoded.userId, id); //
     } catch (serviceError) {
-      console.error("Error stopping service before deletion:", serviceError);
+      console.error("Error stopping service before deletion:", serviceError); //
     }
 
     await db.run(
-      "DELETE FROM forwarding_services WHERE id = ? AND user_id = ?",
+      "DELETE FROM forwarding_services WHERE id = ? AND user_id = ?", //
       [id, decoded.userId]
     );
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Delete service error:", error);
+    console.error("Delete service error:", error); //
     return NextResponse.json(
       { success: false, error: "خطا در حذف سرویس" },
       { status: 500 }
-    );
+    ); //
   }
 }

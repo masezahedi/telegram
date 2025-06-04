@@ -227,15 +227,16 @@ async function startUserServices(userId) {
   try {
     console.log(`🚀 Starting services for user ${userId}`);
 
-    const db = await openDb();
+    const db = await openDb(); //
 
     const user = await db.get(
       `
-      SELECT u.telegram_session, us.gemini_api_key
+      SELECT u.telegram_session, us.gemini_api_key, 
+             u.is_admin, u.is_premium, u.premium_expiry_date, u.trial_activated_at
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
       WHERE u.id = ?
-    `,
+    `, //
       [userId]
     );
 
@@ -244,13 +245,54 @@ async function startUserServices(userId) {
       return;
     }
 
+    // NEW LOGIC: Check user account status before starting services
+    const now = new Date();
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
+
+    let isAccountExpired = false;
+    if (!user.is_admin) {
+      if (user.is_premium) {
+        if (user.premium_expiry_date && new Date(user.premium_expiry_date) < now) {
+          isAccountExpired = true;
+          console.log(`❌ Premium account for user ${userId} has expired.`);
+          // Optionally, downgrade user here if not handled by checkAndExpireServices
+          await db.run("UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [userId]); //
+        }
+      } else { // Normal user
+        if (user.trial_activated_at) {
+          const trialActivatedDate = new Date(user.trial_activated_at);
+          const trialExpiryDate = new Date(trialActivatedDate);
+          trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays); //
+
+          if (now >= trialExpiryDate) {
+            isAccountExpired = true;
+            console.log(`❌ Trial period for user ${userId} has expired.`);
+          }
+        } else {
+          // Trial not activated, this user shouldn't have active services
+          console.log(`⚠️ Trial not activated for normal user ${userId}. Cannot start services.`);
+          isAccountExpired = true; // Effectively expired for starting services
+        }
+      }
+    }
+
+    if (isAccountExpired) {
+        console.log(`🛑 User ${userId} account expired. Stopping all their services.`);
+        await stopUserServices(userId); // Ensure all their services are stopped
+        return; // Do not proceed to start services
+    }
+    // END NEW LOGIC
+
     const services = await db.all(
-      "SELECT * FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+      "SELECT * FROM forwarding_services WHERE user_id = ? AND is_active = 1", //
       [userId]
     );
 
     if (services.length === 0) {
       console.log(`⚠️ No active services found for user: ${userId}`);
+      // Ensure all services are stopped if there are no active ones in DB
+      await stopUserServices(userId);
       return;
     }
 
@@ -258,10 +300,10 @@ async function startUserServices(userId) {
       `📋 Found ${services.length} active services for user ${userId}`
     );
 
-    const client = await getOrCreateClient(userId, user.telegram_session);
+    const client = await getOrCreateClient(userId, user.telegram_session); //
 
     // 🔥 IMPROVED: پاک کردن کامل سرویس‌های قبلی
-    await stopUserServices(userId);
+    await stopUserServices(userId); //
 
     // 🔥 NEW: پاک کردن cache پیام‌های پردازش شده
     cleanProcessedMessagesCache(userId);
@@ -713,14 +755,14 @@ async function stopUserServices(userId) {
 
 async function initializeAllServices() {
   try {
-    const db = await openDb();
+    const db = await openDb(); //
 
     const users = await db.all(`
       SELECT DISTINCT u.id
       FROM users u
       INNER JOIN forwarding_services fs ON u.id = fs.user_id
       WHERE fs.is_active = 1
-    `);
+    `); //
 
     console.log(`🔍 Found ${users.length} users with active services`);
 

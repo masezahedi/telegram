@@ -1,3 +1,4 @@
+// components/dashboard/services/forwarding-service-form.js
 "use client";
 
 import { useState, useEffect } from "react";
@@ -122,8 +123,8 @@ export default function ForwardingServiceForm({
   const [isTelegramConnected, setIsTelegramConnected] = useState(false);
 
   // Extract tariff settings from userAccountStatus
-  const normalUserMaxChannelsPerService = userAccountStatus?.normalUserMaxChannelsPerService ?? 1;
-  const premiumUserMaxChannelsPerService = userAccountStatus?.premiumUserMaxChannelsPerService ?? 10;
+  const normalUserMaxChannelsPerService = userAccountStatus?.normalUserMaxChannelsPerService ?? 1; //
+  const premiumUserMaxChannelsPerService = userAccountStatus?.premiumUserMaxChannelsPerService ?? 10; //
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -189,9 +190,9 @@ export default function ForwardingServiceForm({
 
   useEffect(() => {
     const checkRequirements = async () => {
-      const user = AuthService.getStoredUser();
+      const user = AuthService.getStoredUser(); //
       setIsTelegramConnected(Boolean(user?.isTelegramConnected));
-      const settings = await SettingsService.getSettings();
+      const settings = await SettingsService.getSettings(); //
       setHasGeminiKey(Boolean(settings?.gemini_api_key));
     };
     checkRequirements();
@@ -239,13 +240,26 @@ export default function ForwardingServiceForm({
       );
       return;
     }
+
+    // NEW LOGIC: Prevent creation/editing if user account is expired or trial not activated
+    const isNewService = !service?.id;
     if (
-      userAccountStatus?.isExpired &&
-      !userAccountStatus?.isPremium &&
-      !userAccountStatus?.isAdmin
+      !userAccountStatus?.isAdmin && // Not an admin
+      (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) && // Not premium AND trial expired
+      isNewService // Only block new service creation for expired normal users
     ) {
       toast.error(
-        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد یا ویرایش کنید."
+        "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدید ایجاد یا ویرایش کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
+      );
+      return;
+    }
+    if (
+      !userAccountStatus?.isAdmin && // Not an admin
+      !userAccountStatus?.isPremium && // Not premium
+      !userAccountStatus?.trialActivated // Trial not yet activated
+    ) {
+      toast.error(
+        `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${userAccountStatus.normalUserTrialDays} روزه" در بخش "لیست سرویس‌ها" کلیک کنید.`
       );
       return;
     }
@@ -337,8 +351,8 @@ export default function ForwardingServiceForm({
       };
 
       const result = service?.id
-        ? await ForwardingService.updateService(service.id, cleanedValues)
-        : await ForwardingService.createService(cleanedValues);
+        ? await ForwardingService.updateService(service.id, cleanedValues) //
+        : await ForwardingService.createService(cleanedValues); //
 
       if (result.success) {
         toast.success(
@@ -365,7 +379,7 @@ export default function ForwardingServiceForm({
         toast.error(result.error || "خطا در عملیات سرویس");
       }
     } catch (error) {
-      console.error("Service operation error:", error);
+      console.error("Service operation error:", error); //
       toast.error("خطا در عملیات سرویس");
     } finally {
       setLoading(false);
@@ -379,8 +393,8 @@ export default function ForwardingServiceForm({
   const channelLimitMessage = userAccountStatus?.isAdmin
     ? "مدیران محدودیتی در تعداد کانال ندارند."
     : userAccountStatus?.isPremium
-      ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدا و مقصد تعریف کنند.`
-      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و مقصد تعریف کنند.`;
+      ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`
+      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدا و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
 
 
   if (!isTelegramConnected) {
@@ -399,19 +413,36 @@ export default function ForwardingServiceForm({
     );
   }
 
+  // NEW LOGIC: Block new service creation if trial is expired
   if (
-    userAccountStatus?.isExpired &&
-    !service?.id &&
-    !userAccountStatus?.isPremium &&
-    !userAccountStatus?.isAdmin
+    !service?.id && // This is a new service, not an edit
+    !userAccountStatus?.isAdmin && // Not an admin
+    (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) // Not premium AND trial expired
   ) {
     return (
       <Alert variant="destructive">
         <Info className="h-4 w-4" />
         <AlertTitle>مهلت استفاده به پایان رسیده</AlertTitle>
         <AlertDescription>
-          مهلت استفاده ۱۵ روزه شما به پایان رسیده است. برای ایجاد سرویس جدید،
+          مهلت استفاده شما به پایان رسیده است. برای ایجاد سرویس جدید،
           لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  // NEW LOGIC: Block new service creation if trial not activated
+  if (
+    !service?.id && // This is a new service, not an edit
+    !userAccountStatus?.isAdmin && // Not an admin
+    !userAccountStatus?.isPremium && // Not premium
+    !userAccountStatus?.trialActivated // Trial not yet activated
+  ) {
+    return (
+      <Alert variant="warning">
+        <Info className="h-4 w-4" />
+        <AlertTitle>فعال‌سازی مهلت آزمایشی</AlertTitle>
+        <AlertDescription>
+          برای شروع ایجاد سرویس، ابتدا باید مهلت {userAccountStatus.normalUserTrialDays} روزه آزمایشی خود را فعال کنید. لطفاً به بخش "لیست سرویس‌ها" مراجعه کرده و روی دکمه "فعال‌سازی مهلت آزمایشی" کلیک کنید.
         </AlertDescription>
       </Alert>
     );
@@ -878,7 +909,7 @@ export default function ForwardingServiceForm({
                     <FormLabel>قالب دستور به هوش مصنوعی (پرامپت)</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="مثال: متن زیر را به فارسی روان ترجمه کن..."
+                        placeholder="مثال: متن زیر را به فارسی روان ترجمه کن  :\n\n{text}"
                         className="min-h-[120px] font-mono text-sm leading-relaxed"
                         dir="rtl"
                         {...field}
@@ -896,81 +927,6 @@ export default function ForwardingServiceForm({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-x-2">
-              <MessageSquareText className="h-5 w-5 text-primary" />
-              جایگزینی متن
-            </CardTitle>
-            <CardDesc>قوانین جستجو و جایگزینی عبارات در متن پیام‌ها.</CardDesc>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {ruleFields.map((item, index) => (
-              <div
-                key={item.id}
-                className="flex items-end gap-x-2 p-3 border rounded-md bg-muted/20"
-              >
-                <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                  <FormField
-                    control={form.control}
-                    name={`searchReplaceRules.${index}.search`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <FormLabel>متن جستجو</FormLabel>
-                        <FormControl>
-                          <Input
-                            dir="rtl"
-                            placeholder="عبارتی که می‌خواهید پیدا شود"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name={`searchReplaceRules.${index}.replace`}
-                    render={({ field: controlledField }) => (
-                      <FormItem>
-                        <FormLabel>متن جایگزین</FormLabel>
-                        <FormControl>
-                          <Input
-                            dir="rtl"
-                            placeholder="عبارتی که جایگزین می‌شود (خالی برای حذف)"
-                            {...controlledField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeRule(index)}
-                  className="text-destructive hover:text-destructive/80 shrink-0"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span className="sr-only">حذف قانون</span>
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => appendRule({ search: "", replace: "" })}
-              className="w-full gap-x-1"
-            >
-              <Plus className="h-4 w-4" />
-              افزودن قانون جدید
-            </Button>
-          </CardContent>
-        </Card>
-
         <div className="flex justify-start pt-4">
           <Button
             type="submit"
@@ -978,10 +934,10 @@ export default function ForwardingServiceForm({
             className="w-full sm:w-auto"
             disabled={
               loading ||
-              (userAccountStatus?.isExpired &&
-                !userAccountStatus?.isPremium &&
-                !userAccountStatus?.isAdmin &&
-                !service?.id)
+              (!service?.id && !userAccountStatus?.isAdmin && // Not admin, and this is a new service
+                (!userAccountStatus?.isPremium && userAccountStatus?.isExpired) || // Not premium and expired
+                (!userAccountStatus?.isPremium && !userAccountStatus?.trialActivated) // Not premium and trial not activated
+              )
             }
           >
             {loading

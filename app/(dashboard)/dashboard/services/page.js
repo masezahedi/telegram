@@ -1,10 +1,11 @@
+// app/(dashboard)/dashboard/services/page.js
 "use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserService } from '@/lib/services/user-service'; // Make sure UserService is imported
-import { AuthService } from "@/lib/services/auth-service";
+import { UserService } from '@/lib/services/user-service'; // Make sure UserService is imported //
+import { AuthService } from "@/lib/services/auth-service"; //
 import {
   Card,
   CardContent,
@@ -26,22 +27,21 @@ export default function Services() {
   const [key, setKey] = useState(0); // For re-rendering list/form if user status changes
 
   const fetchUserAndSetState = async () => {
-    const storedUser = AuthService.getStoredUser();
+    const storedUser = AuthService.getStoredUser(); //
     if (storedUser) {
       setUser(storedUser);
     } else {
       // Fallback or if localStorage is cleared/stale
-      const freshUser = await UserService.getCurrentUser(); // Assuming UserService exists and fetches fresh data
-      if (freshUser) {
+      const freshUser = await UserService.getCurrentUser(); // Assuming UserService exists and fetches fresh data //
+      if (freshUser?.user) { // getCurrentUser returns { user: ... }
         // Update local storage with fresh data, including tariff settings
-        const { user: freshUserData } = freshUser; // getCurrentUser returns { user: ... }
-        localStorage.setItem("user", JSON.stringify({
-          ...freshUserData,
-          isTelegramConnected: Boolean(freshUserData.telegramSession),
-          isAdmin: Boolean(freshUserData.isAdmin),
-          isPremium: Boolean(freshUserData.isPremium),
+        localStorage.setItem("user", JSON.stringify({ //
+          ...freshUser.user,
+          isTelegramConnected: Boolean(freshUser.user.telegramSession),
+          isAdmin: Boolean(freshUser.user.isAdmin),
+          isPremium: Boolean(freshUser.user.isPremium),
         }));
-        setUser(freshUserData);
+        setUser(freshUser.user); // Get the updated user object from local storage
       } else {
         toast.error("خطا در دریافت اطلاعات کاربر.");
         router.replace("/login");
@@ -53,7 +53,7 @@ export default function Services() {
     const checkAuthAndLoadUser = async () => {
       setLoading(true);
       try {
-        const isAuthenticated = await AuthService.isAuthenticated();
+        const isAuthenticated = await AuthService.isAuthenticated(); //
         if (!isAuthenticated) {
           router.replace("/login");
           return;
@@ -84,8 +84,10 @@ export default function Services() {
   let alertVariant = "default";
   
   // Extract tariff settings from user object
-  const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15;
-  const premiumUserDefaultDays = user?.tariffSettings?.premiumUserDefaultDays ?? 30;
+  const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15; //
+
+  // NEW: Add a flag for trial activation status
+  let isTrialActivated = Boolean(user?.trialActivatedAt);
 
 
   if (user && !user.isAdmin) {
@@ -112,7 +114,7 @@ export default function Services() {
       }
     } else {
       // Normal user
-      if (user.trialActivatedAt) {
+      if (isTrialActivated) {
         const trialActivatedDate = new Date(user.trialActivatedAt);
         const trialExpiry = new Date(trialActivatedDate);
         trialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays); // Use dynamic trial days
@@ -198,6 +200,10 @@ export default function Services() {
                     isExpired: isAccountExpired,
                     isPremium: user?.isPremium,
                     isAdmin: user?.isAdmin,
+                    trialActivated: isTrialActivated, // NEW: Pass trial activation status
+                    normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
+                    normalUserMaxActiveServices: user?.tariffSettings?.normalUserMaxActiveServices, //
+                    premiumUserMaxActiveServices: user?.tariffSettings?.premiumUserMaxActiveServices, //
                   }}
                 />
               </TabsContent>
@@ -209,9 +215,11 @@ export default function Services() {
                     isExpired: isAccountExpired,
                     isPremium: user?.isPremium,
                     isAdmin: user?.isAdmin,
+                    trialActivated: isTrialActivated, // NEW: Pass trial activation status
+                    normalUserTrialDays: normalUserTrialDays, // NEW: Pass trial days
                     // Pass tariff settings to form for client-side validation messages if needed
-                    normalUserMaxChannelsPerService: user?.tariffSettings?.normalUserMaxChannelsPerService,
-                    premiumUserMaxChannelsPerService: user?.tariffSettings?.premiumUserMaxChannelsPerService,
+                    normalUserMaxChannelsPerService: user?.tariffSettings?.normalUserMaxChannelsPerService, //
+                    premiumUserMaxChannelsPerService: user?.tariffSettings?.premiumUserMaxChannelsPerService, //
                   }}
                 />
               </TabsContent>

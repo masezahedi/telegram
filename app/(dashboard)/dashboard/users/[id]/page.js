@@ -1,10 +1,11 @@
+// app/(dashboard)/dashboard/users/[id]/page.js
 "use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AuthService } from "@/lib/services/auth-service";
-import { UserService } from "@/lib/services/user-service";
+import { AuthService } from "@/lib/services/auth-service"; //
+import { UserService } from "@/lib/services/user-service"; //
 import {
   Card,
   CardContent,
@@ -49,11 +50,11 @@ export default function UserDetails({ params }) {
 
   const fetchSpecificUserData = async () => {
     try {
-      const userDetails = await UserService.getUserDetails(params.id);
-      if (userDetails) {
+      const userDetails = await UserService.getUserDetails(params.id); //
+      if (userDetails?.user) { // API response now wraps user data under 'user' key
         setUserData({
-          ...userDetails,
-          services: (userDetails.services || []).map((service) => ({
+          ...userDetails.user,
+          services: (userDetails.user.services || []).map((service) => ({ //
             ...service,
             source_channels: Array.isArray(service.source_channels)
               ? service.source_channels
@@ -67,22 +68,22 @@ export default function UserDetails({ params }) {
           })),
         });
         // Initialize edit states for user premium/trial info
-        setEditIsPremium(Boolean(userDetails.is_premium));
+        setEditIsPremium(Boolean(userDetails.user.is_premium));
         setEditPremiumExpiryDate(
-          userDetails.premium_expiry_date
-            ? new Date(userDetails.premium_expiry_date)
+          userDetails.user.premium_expiry_date
+            ? new Date(userDetails.user.premium_expiry_date)
                 .toISOString()
                 .split("T")[0]
             : ""
         );
         setEditTrialActivatedAt(
-          userDetails.trial_activated_at
-            ? new Date(userDetails.trial_activated_at)
+          userDetails.user.trial_activated_at
+            ? new Date(userDetails.user.trial_activated_at)
                 .toISOString()
                 .split("T")[0]
             : ""
         );
-        setEditServiceCreationCount(userDetails.service_creation_count); // NEW: Initialize service creation count
+        setEditServiceCreationCount(userDetails.user.service_creation_count); // NEW: Initialize service creation count
       } else {
         toast.error("کاربر مورد نظر یافت نشد.");
       }
@@ -96,12 +97,12 @@ export default function UserDetails({ params }) {
     const checkAuthAndLoadData = async () => {
       setLoading(true);
       try {
-        const isAuthenticated = await AuthService.isAuthenticated();
+        const isAuthenticated = await AuthService.isAuthenticated(); //
         if (!isAuthenticated) {
           router.replace("/login");
           return;
         }
-        const loggedInUser = AuthService.getStoredUser();
+        const loggedInUser = AuthService.getStoredUser(); //
         if (!loggedInUser?.isAdmin) {
           toast.error("دسترسی غیر مجاز. شما ادمین نیستید.");
           router.replace("/dashboard");
@@ -133,7 +134,7 @@ export default function UserDetails({ params }) {
     e.preventDefault();
     setIsSubmittingPremium(true); // Re-use this loading state for now
     try {
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("auth_token"); //
       const payload = {
         is_premium: editIsPremium,
         premium_expiry_date: editPremiumExpiryDate
@@ -145,7 +146,7 @@ export default function UserDetails({ params }) {
         service_creation_count: editServiceCreationCount, // NEW: Include service creation count
       };
 
-      const response = await fetch(`/api/admin/users/${params.id}`, {
+      const response = await fetch(`/api/admin/users/${params.id}`, { //
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -184,9 +185,9 @@ export default function UserDetails({ params }) {
     if (!editingServiceForDate) return;
     setIsSubmittingServiceDate(true);
     try {
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("auth_token"); //
       const response = await fetch(
-        `/api/admin/services/${editingServiceForDate.id}`,
+        `/api/admin/services/${editingServiceForDate.id}`, //
         {
           method: "PUT",
           headers: {
@@ -220,6 +221,7 @@ export default function UserDetails({ params }) {
   if (loading) {
     return (
       <DashboardLayout user={currentUser}>
+        {" "}
         <div className="h-full flex items-center justify-center">
           <div className="h-8 w-8 rounded-full border-4 border-primary border-r-transparent animate-spin"></div>
         </div>
@@ -457,128 +459,6 @@ export default function UserDetails({ params }) {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>سرویس‌های کاربر</CardTitle>
-            <CardDescription>
-              لیست تمامی سرویس‌های تعریف شده توسط کاربر
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {userData.services && userData.services.length > 0 ? (
-              <div className="space-y-4">
-                {userData.services.map((service) => {
-                  let serviceStatusMessage = "-";
-                  const serviceActivatedAtFa = service.service_activated_at
-                    ? new Date(service.service_activated_at).toLocaleDateString(
-                        "fa-IR"
-                      )
-                    : "-";
-
-                  // Use tariff settings for trial expiry calculation if available in user object
-                  const normalUserTrialDays = currentUser?.tariffSettings?.normalUserTrialDays ?? 15;
-
-                  if (!userData.is_premium && service.service_activated_at) {
-                    const expiry = new Date(service.service_activated_at);
-                    expiry.setDate(expiry.getDate() + normalUserTrialDays); // Use dynamic trial days
-                    if (new Date() > expiry) {
-                      serviceStatusMessage = `منقضی شده در: ${expiry.toLocaleDateString(
-                        "fa-IR"
-                      )}`;
-                    } else {
-                      serviceStatusMessage = `فعال تا: ${expiry.toLocaleDateString(
-                        "fa-IR"
-                      )}`;
-                    }
-                  } else if (
-                    userData.is_premium &&
-                    userData.premium_expiry_date
-                  ) {
-                    serviceStatusMessage = `مطابق انقضای پرمیوم (${formattedPremiumExpiry})`;
-                  } else if (
-                    userData.is_premium &&
-                    !userData.premium_expiry_date
-                  ) {
-                    serviceStatusMessage = "فعال (پرمیوم بدون تاریخ انقضا)";
-                  }
-
-                  return (
-                    <Card key={service.id}>
-                      <CardHeader className="flex flex-row justify-between items-start">
-                        <div>
-                          <h3 className="text-lg font-semibold">
-                            {service.name}
-                          </h3>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-xs ${
-                              service.is_active
-                                ? "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-400"
-                                : "bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-400"
-                            }`}
-                          >
-                            {service.is_active ? "فعال" : "غیرفعال"}
-                          </span>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditServiceDateDialog(service)}
-                        >
-                          <CalendarClock className="ml-2 h-4 w-4" /> ویرایش
-                          تاریخ اولین فعالیت
-                        </Button>
-                      </CardHeader>
-                      <CardContent className="pt-0">
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            نوع:{" "}
-                            {service.type === "copy"
-                              ? "کپی کانال"
-                              : "فوروارد خودکار"}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            تاریخ اولین فعال‌سازی: {serviceActivatedAtFa}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            وضعیت مهلت: {serviceStatusMessage}
-                          </p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 mt-2">
-                            <div>
-                              <Label className="text-xs text-muted-foreground">
-                                مبدا:
-                              </Label>
-                              <div className="text-sm">
-                                {Array.isArray(service.source_channels)
-                                  ? service.source_channels.join(", ")
-                                  : service.source_channels || ""}
-                              </div>
-                            </div>
-                            <div>
-                              <Label className="text-xs text-muted-foreground">
-                                مقصد:
-                              </Label>
-                              <div className="text-sm">
-                                {Array.isArray(service.target_channels)
-                                  ? service.target_channels.join(", ")
-                                  : service.target_channels || ""}
-                              </div>
-                            </div>
-                          </div>
-                          {/* ... other service details ... */}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                هیچ سرویسی برای این کاربر یافت نشد.
-              </div>
-            )}
           </CardContent>
         </Card>
 

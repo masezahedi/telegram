@@ -3,20 +3,20 @@
 const express = require("express");
 const cors = require("cors");
 const { Api } = require("telegram");
-const { verifyToken } = require("./utils/auth");
-const { createClient, activeClients } = require("./services/telegram/client");
+const { verifyToken } = require("./utils/auth"); //
+const { createClient, activeClients } = require("./services/telegram/client"); //
 const {
   initializeAllServices,
   stopService, // Make sure stopService is correctly imported and used
   // activeServices, // This was used in health check, ensure it's still valid or adjust health check
-} = require("./services/telegram/service-manager");
+} = require("./services/telegram/service-manager"); //
 const {
   messageMaps,
   saveMessageMap,
   cleanExpiredMessages,
-} = require("./services/telegram/message-maps");
-const { API_ID, API_HASH } = require("./config");
-const { openDb } = require("./utils/db"); // Ensure this is correctly pathed if db.js is in server/utils
+} = require("./services/telegram/message-maps"); //
+const { API_ID, API_HASH } = require("./config"); //
+const { openDb } = require("./utils/db"); // Ensure this is correctly pathed if db.js is in server/utils //
 
 const app = express();
 
@@ -59,7 +59,7 @@ app.post("/sendCode", async (req, res) => {
       return res.status(400).json({ error: "Phone number is required" });
     }
 
-    const client = await createClient(); // from ./services/telegram/client
+    const client = await createClient(); // from ./services/telegram/client //
     const result = await client.invoke(
       new Api.auth.SendCode({
         phoneNumber,
@@ -70,7 +70,7 @@ app.post("/sendCode", async (req, res) => {
     );
 
     activeClients.set(phoneNumber, {
-      // from ./services/telegram/client
+      // from ./services/telegram/client //
       client,
       phoneCodeHash: result.phoneCodeHash,
     });
@@ -88,7 +88,7 @@ app.post("/sendCode", async (req, res) => {
 app.post("/signIn", async (req, res) => {
   try {
     const { phoneNumber, code } = req.body;
-    const data = activeClients.get(phoneNumber);
+    const data = activeClients.get(phoneNumber); //
 
     if (!data) {
       return res.status(400).json({
@@ -111,7 +111,7 @@ app.post("/signIn", async (req, res) => {
     );
 
     const stringSession = client.session.save();
-    activeClients.delete(phoneNumber); // Ensure this is intended after successful sign-in
+    activeClients.delete(phoneNumber); // Ensure this is intended after successful sign-in //
 
     res.json({ success: true, stringSession });
   } catch (err) {
@@ -127,7 +127,7 @@ app.post("/signIn", async (req, res) => {
 app.post("/checkPassword", async (req, res) => {
   try {
     const { phoneNumber, password } = req.body;
-    const data = activeClients.get(phoneNumber);
+    const data = activeClients.get(phoneNumber); //
 
     if (!data) {
       return res.status(400).json({
@@ -152,7 +152,7 @@ app.post("/checkPassword", async (req, res) => {
     );
 
     const stringSession = client.session.save();
-    activeClients.delete(phoneNumber);
+    activeClients.delete(phoneNumber); //
 
     res.json({
       success: true,
@@ -171,13 +171,13 @@ app.post("/checkPassword", async (req, res) => {
 app.post("/services/start", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    const decoded = await verifyToken(token); // from ./utils/auth
+    const decoded = await verifyToken(token); // from ./utils/auth //
 
     if (!decoded) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     // startUserServices needs to be the one from service-manager
-    await require("./services/telegram/service-manager").startUserServices(
+    await require("./services/telegram/service-manager").startUserServices( //
       decoded.userId
     );
     res.json({ success: true });
@@ -190,13 +190,13 @@ app.post("/services/start", async (req, res) => {
 app.post("/services/stop", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    const decoded = await verifyToken(token); // from ./utils/auth
+    const decoded = await verifyToken(token); // from ./utils/auth //
 
     if (!decoded) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     // stopUserServices needs to be the one from service-manager
-    await require("./services/telegram/service-manager").stopUserServices(
+    await require("./services/telegram/service-manager").stopUserServices( //
       decoded.userId
     );
     res.json({ success: true });
@@ -207,13 +207,13 @@ app.post("/services/stop", async (req, res) => {
 });
 
 // New: Tariff Settings API
-app.use("/tariff-settings", require("./routes/tariff-settings"));
+app.use("/tariff-settings", require("./routes/tariff-settings")); //
 
 // Health check endpoint
 app.get("/health", (req, res) => {
   const {
     activeServices: activeUserServicesMap,
-  } = require("./services/telegram/service-manager");
+  } = require("./services/telegram/service-manager"); //
   const activeServiceInstanceCount = Array.from(
     activeUserServicesMap.values()
   ).reduce((total, userServices) => total + userServices.size, 0);
@@ -221,29 +221,28 @@ app.get("/health", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
-    activeTelegramClients: activeClients.size, // from client.js
-    activeServiceInstances: activeServiceInstanceCount, // from service-manager.js
+    activeTelegramClients: activeClients.size, // from client.js //
+    activeServiceInstances: activeServiceInstanceCount, // from service-manager.js //
   });
 });
 
 async function checkAndExpireServices() {
   console.log("🕒 Checking for expired user accounts and services...");
   try {
-    const db = await openDb();
+    const db = await openDb(); //
     const now = new Date();
     const nowISO = now.toISOString();
 
     // Fetch tariff settings
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
-    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
-    const premiumUserDefaultDays = tariffSettings?.premium_user_default_days ?? 30;
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1"); //
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15; //
 
     // 1. Handle premium users whose subscription expired
     const expiredPremiumUsers = await db.all(
       `
       SELECT id FROM users
       WHERE is_admin = 0 AND is_premium = 1 AND premium_expiry_date IS NOT NULL AND premium_expiry_date < ?
-    `,
+    `, //
       [nowISO]
     );
 
@@ -252,12 +251,12 @@ async function checkAndExpireServices() {
         `⏳ Premium expired for user ${user.id}. Deactivating services and reverting to normal user status.`
       );
       await db.run(
-        "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
         [user.id]
       );
 
       const userServices = await db.all(
-        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1", //
         [user.id]
       );
       for (const service of userServices) {
@@ -265,11 +264,11 @@ async function checkAndExpireServices() {
           `🔴 Deactivating service ${service.id} for user ${user.id} due to premium expiry.`
         );
         await db.run(
-          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
           [service.id]
         );
         try {
-          await stopService(user.id, service.id); // from service-manager
+          await stopService(user.id, service.id); // from service-manager //
         } catch (err) {
           console.error(
             `Error stopping expired premium service ${service.id}:`,
@@ -286,13 +285,13 @@ async function checkAndExpireServices() {
       SELECT id, trial_activated_at FROM users
       WHERE is_admin = 0 AND is_premium = 0 
         AND trial_activated_at IS NOT NULL
-    `
+    ` //
     );
 
     for (const user of expiredNormalUsers) {
       const trialActivatedDate = new Date(user.trial_activated_at);
       const trialExpiryDate = new Date(trialActivatedDate);
-      trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+      trialExpiryDate.setDate(trialActivatedDate.getDate() + normalUserTrialDays); //
 
       if (now >= trialExpiryDate) {
         console.log(
@@ -301,12 +300,12 @@ async function checkAndExpireServices() {
         
         // Ensure premium_expiry_date is set to the actual expiry date for these users
         await db.run(
-          "UPDATE users SET premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE users SET premium_expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
           [trialExpiryDate.toISOString(), user.id]
         );
 
         const userServices = await db.all(
-          "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+          "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1", //
           [user.id]
         );
         for (const service of userServices) {
@@ -314,11 +313,11 @@ async function checkAndExpireServices() {
             `🔴 Deactivating service ${service.id} for user ${user.id} due to trial expiry.`
           );
           await db.run(
-            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", //
             [service.id]
           );
           try {
-            await stopService(user.id, service.id); // from service-manager
+            await stopService(user.id, service.id); // from service-manager //
           } catch (err) {
             console.error(
               `Error stopping expired trial service ${service.id}:`,
@@ -359,7 +358,7 @@ process.on("SIGINT", async () => {
   // Disconnect persistent clients from service-manager
   const {
     activeClients: persistentClients,
-  } = require("./services/telegram/client");
+  } = require("./services/telegram/client"); //
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
       try {
@@ -395,7 +394,7 @@ process.on("SIGTERM", async () => {
   }
   const {
     activeClients: persistentClients,
-  } = require("./services/telegram/client");
+  } = require("./services/telegram/client"); //
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
       try {
@@ -410,7 +409,7 @@ process.on("SIGTERM", async () => {
 });
 
 // Initialize all services on server start (from service-manager)
-require("./services/telegram/service-manager").initializeAllServices();
+require("./services/telegram/service-manager").initializeAllServices(); //
 
 const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
 // const EXPIRY_CHECK_INTERVAL = 30 * 1000; // For testing: 30 seconds

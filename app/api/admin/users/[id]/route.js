@@ -1,26 +1,26 @@
 // File: app/api/admin/users/[id]/route.js
 import { NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
-import { openDb } from "@/lib/db";
+import { verifyToken } from "@/lib/auth"; //
+import { openDb } from "@/lib/db"; //
 
 export const dynamic = "force-dynamic";
 
 // GET function remains the same
 export async function GET(request, { params }) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decoded = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decoded = await verifyToken(token); //
 
     if (!decoded) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
-      );
+      ); //
     }
 
-    const db = await openDb();
+    const db = await openDb(); //
 
-    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [ //
       decoded.userId,
     ]);
 
@@ -41,7 +41,7 @@ export async function GET(request, { params }) {
       FROM users u
       LEFT JOIN user_settings us ON u.id = us.user_id
       WHERE u.id = ?
-    `,
+    `, //
       [params.id]
     );
 
@@ -55,26 +55,26 @@ export async function GET(request, { params }) {
     const services = await db.all(
       `
       SELECT * FROM forwarding_services WHERE user_id = ? ORDER BY created_at DESC
-    `,
+    `, //
       [params.id]
     );
 
     return NextResponse.json({
-      success: true,
+      success: true, //
       user: {
-        ...user,
-        is_admin: Boolean(user.is_admin),
-        is_premium: Boolean(user.is_premium),
-        services: services.map((s) => ({
+        ...user, //
+        is_admin: Boolean(user.is_admin), //
+        is_premium: Boolean(user.is_premium), //
+        services: services.map((s) => ({ //
           ...s,
-          source_channels: JSON.parse(s.source_channels || "[]"),
-          target_channels: JSON.parse(s.target_channels || "[]"),
-          search_replace_rules: JSON.parse(s.search_replace_rules || "[]"),
+          source_channels: JSON.parse(s.source_channels || "[]"), //
+          target_channels: JSON.parse(s.target_channels || "[]"), //
+          search_replace_rules: JSON.parse(s.search_replace_rules || "[]"), //
         })),
       },
     });
   } catch (error) {
-    console.error("Get user details error:", error);
+    console.error("Get user details error:", error); //
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 }
@@ -84,8 +84,8 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    const decodedAdmin = await verifyToken(token);
+    const token = request.headers.get("authorization")?.split(" ")[1]; //
+    const decodedAdmin = await verifyToken(token); //
 
     if (!decodedAdmin) {
       return NextResponse.json(
@@ -94,8 +94,8 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const db = await openDb();
-    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [
+    const db = await openDb(); //
+    const adminCheck = await db.get("SELECT is_admin FROM users WHERE id = ?", [ //
       decodedAdmin.userId,
     ]);
 
@@ -160,7 +160,7 @@ export async function PUT(request, { params }) {
     const sql = `UPDATE users SET updated_at = CURRENT_TIMESTAMP, ${sqlSetStatements} WHERE id = ?`;
     queryParams.push(userIdToUpdate);
 
-    const result = await db.run(sql, ...queryParams);
+    const result = await db.run(sql, ...queryParams); //
 
     if (result.changes === 0) {
       return NextResponse.json(
@@ -170,7 +170,7 @@ export async function PUT(request, { params }) {
     }
 
     const updatedUser = await db.get(
-      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at, service_creation_count FROM users WHERE id = ?",
+      "SELECT id, name, email, is_admin, is_premium, premium_expiry_date, trial_activated_at, service_creation_count FROM users WHERE id = ?", //
       [userIdToUpdate]
     );
 
@@ -184,7 +184,7 @@ export async function PUT(request, { params }) {
       },
     });
   } catch (error) {
-    console.error("Admin update user error:", error);
+    console.error("Admin update user error:", error); //
     return NextResponse.json(
       { success: false, error: "خطا در سرور هنگام به‌روزرسانی اطلاعات کاربر." },
       { status: 500 }
