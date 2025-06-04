@@ -1,16 +1,11 @@
 // app/api/admin/tariffs/route.js
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
-// The following import is problematic as Next.js API routes do not directly access server/config
-// import { JWT_SECRET } from "@/server/config"; // REMOVE THIS LINE
 
 export const dynamic = "force-dynamic";
 
-// Define the base URL for your Express server.
-// It's crucial that this matches where your Express server is actually running.
-// For development, it's typically localhost:3332. For production, it should be the internal IP or service name if in the same network, or the external URL if it's separate.
-// Given your provided logs, the Express server is running on 3332.
-const EXPRESS_SERVER_BASE_URL = `http://localhost:3332`; // Use 0.0.0.0 if in Docker/containerized environment
+// Use an environment variable for the Express server base URL
+const EXPRESS_SERVER_BASE_URL = process.env.EXPRESS_SERVER_INTERNAL_URL || "http://localhost:3332";
 
 export async function GET(request) {
   try {
@@ -24,12 +19,11 @@ export async function GET(request) {
       );
     }
 
-    // Forward the request to the Express server
     const expressResponse = await fetch(`${EXPRESS_SERVER_BASE_URL}/tariff-settings`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`, // Pass the token to the Express server
+        "Authorization": `Bearer ${token}`,
       },
     });
 
@@ -63,12 +57,11 @@ export async function PUT(request) {
 
     const requestBody = await request.json();
 
-    // Forward the request to the Express server
     const expressResponse = await fetch(`${EXPRESS_SERVER_BASE_URL}/tariff-settings`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`, // Pass the token to the Express server
+        "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify(requestBody),
     });
