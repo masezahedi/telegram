@@ -1,3 +1,4 @@
+// components/dashboard/telegram-connection.js
 "use client";
 
 import { useState } from "react";
@@ -45,7 +46,7 @@ const passwordSchema = z.object({
     .min(1, { message: "رمز عبور دو مرحله‌ای را وارد کنید." }),
 });
 
-export default function TelegramConnection({ user }) {
+export default function TelegramConnection({ user, onUserUpdate }) { // Added onUserUpdate prop
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [phoneCodeHash, setPhoneCodeHash] = useState(null);
@@ -193,8 +194,16 @@ export default function TelegramConnection({ user }) {
       if (response.success) {
         setConnected(true);
         toast.success("اتصال به تلگرام با موفقیت انجام شد");
-        setStep(1); // Reset to step 1 (phone number input) for future use if needed, or redirect
+        setStep(1); // Reset to step 1
+        // NEW: Call the prop to update the parent component's user state
+        if (onUserUpdate) {
+          const updatedUser = await UserService.getCurrentUser(); // Fetch the latest user data
+          if (updatedUser?.user) {
+            onUserUpdate(updatedUser.user);
+          }
+        }
       } else {
+        // This is the error message that was being shown
         toast.error(
           response.error || "خطا در ذخیره اطلاعات. لطفاً دوباره تلاش کنید."
         );
@@ -202,6 +211,8 @@ export default function TelegramConnection({ user }) {
     } catch (error) {
       console.error("Error updating session:", error);
       toast.error("خطا در ذخیره اطلاعات. لطفاً دوباره تلاش کنید.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -216,6 +227,13 @@ export default function TelegramConnection({ user }) {
       if (response.success) {
         setConnected(false);
         toast.success("اتصال به تلگرام با موفقیت قطع شد");
+        // NEW: Call the prop to update the parent component's user state
+        if (onUserUpdate) {
+          const updatedUser = await UserService.getCurrentUser(); // Fetch the latest user data
+          if (updatedUser?.user) {
+            onUserUpdate(updatedUser.user);
+          }
+        }
       } else {
         toast.error(
           response.error || "خطا در قطع اتصال. لطفاً دوباره تلاش کنید."

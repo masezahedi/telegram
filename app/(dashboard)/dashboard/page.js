@@ -1,3 +1,4 @@
+// app/(dashboard)/dashboard/page.js
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -24,17 +25,19 @@ export default function Dashboard() {
           return;
         }
 
-        // Get stored user data on client side
-        const storedUser = AuthService.getStoredUser();
-        if (storedUser) {
-          setUser(storedUser);
+        // Always fetch fresh user data from API to ensure consistency
+        const userDataResponse = await UserService.getCurrentUser();
+        if (userDataResponse?.user) {
+          // Update localStorage with fresh data
+          localStorage.setItem("user", JSON.stringify({
+            ...userDataResponse.user,
+            isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session from API response
+            isAdmin: Boolean(userDataResponse.user.isAdmin),
+            isPremium: Boolean(userDataResponse.user.isPremium),
+          }));
+          setUser(AuthService.getStoredUser()); // Get the normalized user object from local storage
         } else {
-          const userData = await UserService.getCurrentUser();
-          if (userData) {
-            setUser(userData);
-          } else {
-            router.replace('/login');
-          }
+          router.replace('/login');
         }
       } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -47,6 +50,10 @@ export default function Dashboard() {
 
     checkAuthAndLoadUser();
   }, [router]);
+
+  const handleUserUpdate = (updatedUser) => {
+    setUser(updatedUser); // Update the user state in the Dashboard page
+  };
 
   if (loading) {
     return (
@@ -69,7 +76,7 @@ export default function Dashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <TelegramConnection user={user} />
+            <TelegramConnection user={user} onUserUpdate={handleUserUpdate} />
           </CardContent>
         </Card>
       </div>

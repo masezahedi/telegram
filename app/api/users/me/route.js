@@ -41,14 +41,14 @@ export async function GET(request) {
         id: user.id,
         name: user.name,
         email: user.email,
-        telegram_session: user.telegram_session, // Consistent casing
+        telegram_session: user.telegram_session, // Consistent casing: telegram_session
         phoneNumber: user.phone_number,
         isAdmin: Boolean(user.is_admin),
         isPremium: Boolean(user.is_premium),
         premiumExpiryDate: user.premium_expiry_date,
         trialActivatedAt: user.trial_activated_at,
         serviceCreationCount: user.service_creation_count,
-        isTelegramConnected: Boolean(user.telegram_session),
+        // isTelegramConnected: Boolean(user.telegram_session), // This is now calculated directly in AuthService.getStoredUser() or in component
         tariffSettings: {
           normalUserTrialDays: tariffSettings?.normal_user_trial_days ?? 15,
           premiumUserDefaultDays: tariffSettings?.premium_user_default_days ?? 30,
