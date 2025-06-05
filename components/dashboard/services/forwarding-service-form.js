@@ -138,26 +138,21 @@ export default function ForwardingServiceForm({
 
   // Check if trialActivatedAt exists (meaning trial was activated)
   const isTrialActuallyActivated = Boolean(trialActivatedAt);
+  const userPremiumExpiryDate = premiumExpiryDate ? new Date(premiumExpiryDate) : null;
 
   if (!isAdmin) {
-    if (isPremium) {
-      // Premium users: check premiumExpiryDate
-      if (premiumExpiryDate && new Date(premiumExpiryDate) < now) {
-        isAccountExpired = true;
-      }
-    } else {
-      // Normal users: check trial_activated_at and calculate expiry based on normalUserTrialDays
-      if (isTrialActuallyActivated) {
-        const trialStartDate = new Date(trialActivatedAt);
-        const trialEndDate = new Date(trialStartDate);
-        trialEndDate.setDate(trialStartDate.getDate() + normalUserTrialDays);
-        if (trialEndDate < now) {
-          isAccountExpired = true;
+    if (userPremiumExpiryDate) {
+        if (now >= userPremiumExpiryDate) {
+            isAccountExpired = true;
         }
-      } else {
-        // If not premium and trial never activated, consider as expired for service creation/activation purposes
-        isAccountExpired = true; // This handles the case where trial hasn't started yet
-      }
+    } else {
+        // If no premiumExpiryDate and not premium, it means trial is either not activated or expired
+        if (isPremium) { // Should not happen for a premium user without expiry date
+            // If it somehow happens, treat as not expired (lifetime premium)
+            isAccountExpired = false;
+        } else { // Normal user, no premiumExpiryDate implies trial not activated or expired
+            isAccountExpired = true;
+        }
     }
   }
 
@@ -280,7 +275,7 @@ export default function ForwardingServiceForm({
     if (!isAdmin) {
       if (isAccountExpired && isNewService) { // Only block new service creation for expired non-admins
         toast.error(
-          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدیدی ایجاد کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
+          "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدیدی ایجاد کنید. لطفاً اشتراک خود را ارتقا دهید."
         );
         return;
       }
@@ -343,7 +338,7 @@ export default function ForwardingServiceForm({
       if (values.startFromId && values.startFromId.trim()) {
         const messageId = parseInt(values.startFromId.trim(), 10);
         if (isNaN(messageId) || messageId <= 0) {
-          toast.error("شناسه پیام باید یک عدد مثبت باشد");
+          toast.error("شناسه پیام باید یک عدد مثبت باشد.");
           return;
         }
       }

@@ -50,26 +50,22 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
 
   // Check if trialActivatedAt exists (meaning trial was activated)
   const isTrialActuallyActivated = Boolean(trialActivatedAt);
+  const userPremiumExpiryDate = premiumExpiryDate ? new Date(premiumExpiryDate) : null;
+
 
   if (!isAdmin) {
-    if (isPremium) {
-      // Premium users: check premiumExpiryDate
-      if (premiumExpiryDate && new Date(premiumExpiryDate) < now) {
-        isAccountExpired = true;
-      }
-    } else {
-      // Normal users: check trial_activated_at and calculate expiry based on normalUserTrialDays
-      if (isTrialActuallyActivated) {
-        const trialStartDate = new Date(trialActivatedAt);
-        const trialEndDate = new Date(trialStartDate);
-        trialEndDate.setDate(trialStartDate.getDate() + normalUserTrialDays);
-        if (trialEndDate < now) {
-          isAccountExpired = true;
+    if (userPremiumExpiryDate) {
+        if (now >= userPremiumExpiryDate) {
+            isAccountExpired = true;
         }
-      } else {
-        // If not premium and trial never activated, consider as expired for service creation/activation purposes
-        isAccountExpired = true; // This handles the case where trial hasn't started yet
-      }
+    } else {
+        // If no premiumExpiryDate and not premium, it means trial is either not activated or expired
+        if (isPremium) { // Should not happen for a premium user without expiry date
+            // If it somehow happens, treat as not expired (lifetime premium)
+            isAccountExpired = false;
+        } else { // Normal user, no premiumExpiryDate implies trial not activated or expired
+            isAccountExpired = true;
+        }
     }
   }
 
@@ -107,6 +103,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
           await loadServices();
           return;
         }
+        // This check is now redundant if isAccountExpired already covers it, but kept for clarity on initial trial activation
         if (!isPremium && !isTrialActuallyActivated) { // If normal user AND trial NOT activated yet
           toast.error(
             `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
@@ -287,7 +284,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
 
   // Determine if switch should be disabled for limit reasons or general account status
   const disableSwitchDueToLimits = (serviceStatus) => {
-    if (isAdmin) return false; // Admins always enabled
+    if (isAdmin) return false; // Admins bypass these checks
 
     if (!isTelegramConnected) return true; // Disable if Telegram is not connected
     if (isAccountExpired) return true; // Disable if account is expired

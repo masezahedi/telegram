@@ -1,10 +1,11 @@
+// app/(dashboard)/dashboard/settings/page.js
 "use client";
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { UserService } from '@/lib/services/user-service';
 import { AuthService } from '@/lib/services/auth-service';
-import { UserService } from '@/lib/services/user-service'; // Import UserService
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import DashboardLayout from '@/components/dashboard/dashboard-layout';
 import ApiKeySettings from '@/components/dashboard/settings/api-key-settings';
@@ -14,40 +15,49 @@ export default function Settings() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchUserData = async () => {
+    try {
+      const isAuthenticated = await AuthService.isAuthenticated();
+      if (!isAuthenticated) {
+        router.replace('/login');
+        return false;
+      }
+
+      const userDataResponse = await UserService.getCurrentUser();
+      if (userDataResponse?.user) {
+        localStorage.setItem("user", JSON.stringify({
+          ...userDataResponse.user,
+          isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session
+          isAdmin: Boolean(userDataResponse.user.is_admin), // Corrected to is_admin
+          isPremium: Boolean(userDataResponse.user.is_premium), // Corrected to is_premium
+        }));
+        setUser(AuthService.getStoredUser());
+        return true;
+      } else {
+        router.replace('/login');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      toast.error('خطا در بارگذاری اطلاعات کاربر');
+      router.replace('/login');
+      return false;
+    }
+  };
+
   useEffect(() => {
     const checkAuthAndLoadUser = async () => {
-      try {
-        const isAuthenticated = await AuthService.isAuthenticated();
-        if (!isAuthenticated) {
-          router.replace('/login');
-          return;
-        }
-
-        // Fetch current user details including tariff settings
-        const userDataResponse = await UserService.getCurrentUser();
-        if (userDataResponse?.user) { // Access the 'user' property from the response
-          // Update localStorage with fresh user data which now includes tariffSettings
-          localStorage.setItem("user", JSON.stringify({
-            ...userDataResponse.user,
-            isTelegramConnected: Boolean(userDataResponse.user.telegramSession),
-            isAdmin: Boolean(userDataResponse.user.isAdmin),
-            isPremium: Boolean(userDataResponse.user.isPremium),
-          }));
-          setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
-        } else {
-          // If getCurrentUser fails or returns no user, redirect to login
-          router.replace('/login');
-        }
-      } catch (error) {
-        console.error('Error loading settings:', error);
-        toast.error('خطا در بارگذاری تنظیمات');
-        router.replace('/login');
-      } finally {
-        setLoading(false);
-      }
+      setLoading(true);
+      const success = await fetchUserData();
+      setLoading(false);
     };
 
     checkAuthAndLoadUser();
+
+    // Setup polling interval
+    const intervalId = setInterval(fetchUserData, 60 * 1000); // Poll every 1 minute
+
+    return () => clearInterval(intervalId); // Cleanup on unmount
   }, [router]);
 
   if (loading) {

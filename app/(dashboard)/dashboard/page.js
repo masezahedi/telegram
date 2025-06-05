@@ -15,40 +15,53 @@ export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchUserData = async () => {
+    try {
+      const isAuthenticated = await AuthService.isAuthenticated();
+      
+      if (!isAuthenticated) {
+        router.replace('/login');
+        return false;
+      }
+
+      // Always fetch fresh user data from API to ensure consistency
+      const userDataResponse = await UserService.getCurrentUser();
+      if (userDataResponse?.user) {
+        // Update localStorage with fresh data
+        localStorage.setItem("user", JSON.stringify({
+          ...userDataResponse.user,
+          isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session from API response
+          isAdmin: Boolean(userDataResponse.user.is_admin), // Corrected to is_admin from API
+          isPremium: Boolean(userDataResponse.user.is_premium), // Corrected to is_premium from API
+        }));
+        setUser(AuthService.getStoredUser()); // Get the normalized user object from local storage
+        return true;
+      } else {
+        router.replace('/login');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      toast.error('خطا در بارگذاری اطلاعات کاربر');
+      router.replace('/login');
+      return false;
+    }
+  };
+
   useEffect(() => {
     const checkAuthAndLoadUser = async () => {
-      try {
-        const isAuthenticated = await AuthService.isAuthenticated();
-        
-        if (!isAuthenticated) {
-          router.replace('/login');
-          return;
-        }
-
-        // Always fetch fresh user data from API to ensure consistency
-        const userDataResponse = await UserService.getCurrentUser();
-        if (userDataResponse?.user) {
-          // Update localStorage with fresh data
-          localStorage.setItem("user", JSON.stringify({
-            ...userDataResponse.user,
-            isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session from API response
-            isAdmin: Boolean(userDataResponse.user.isAdmin),
-            isPremium: Boolean(userDataResponse.user.isPremium),
-          }));
-          setUser(AuthService.getStoredUser()); // Get the normalized user object from local storage
-        } else {
-          router.replace('/login');
-        }
-      } catch (error) {
-        console.error('Error loading dashboard:', error);
-        toast.error('خطا در بارگذاری اطلاعات');
-        router.replace('/login');
-      } finally {
-        setLoading(false);
-      }
+      setLoading(true);
+      const success = await fetchUserData();
+      setLoading(false);
+      // If not successful, navigation already handled
     };
 
     checkAuthAndLoadUser();
+
+    // Setup polling interval
+    const intervalId = setInterval(fetchUserData, 60 * 1000); // Poll every 1 minute
+
+    return () => clearInterval(intervalId); // Cleanup on unmount
   }, [router]);
 
   const handleUserUpdate = (updatedUser) => {
