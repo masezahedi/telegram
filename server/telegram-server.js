@@ -2,14 +2,12 @@
 
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 const { Api } = require("telegram");
 const { verifyToken } = require("./utils/auth");
 const { createClient, activeClients } = require("./services/telegram/client");
 const {
   initializeAllServices,
   stopService,
-  startUserServices,
 } = require("./services/telegram/service-manager");
 const {
   messageMaps,
@@ -25,10 +23,6 @@ const app = express();
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 3332;
 const HOST = isProduction ? "0.0.0.0" : "localhost";
-
-// ZarinPal configuration (add these to your environment variables)
-const ZARINPAL_MERCHANT_ID = process.env.ZARINPAL_MERCHANT_ID || "YOUR_ZARINPAL_MERCHANT_ID";
-const ZARINPAL_CALLBACK_HOST = isProduction ? "https://sna.freebotmoon.ir:1332" : "http://localhost:1332"; // Host of your Next.js frontend
 
 // CORS configuration
 const corsOptions = {
@@ -208,133 +202,8 @@ app.post("/services/stop", async (req, res) => {
   }
 });
 
-// Tariff Settings API
+// New: Tariff Settings API
 app.use("/tariff-settings", require("./routes/tariff-settings"));
-
-// NEW: ZarinPal Payment Routes
-app.post("/payment/request", async (req, res) => {
-  try {
-    const token = req.headers.authorization?.split(" ")[1];
-    const decoded = await verifyToken(token);
-
-    if (!decoded) {
-      return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
-
-    const { amount, description, callbackUrl } = req.body;
-    const userId = decoded.userId; // استخراج userId از توکن رمزگشایی شده
-
-    if (!amount || amount <= 0 || !description || !callbackUrl) {
-      return res.status(400).json({ success: false, error: "اطلاعات پرداخت ناقص است." });
-    }
-
-    const db = await openDb();
-    const user = await db.get("SELECT email, phone_number FROM users WHERE id = ?", [userId]);
-    if (!user) {
-      return res.status(404).json({ success: false, error: "کاربر یافت نشد." });
-    }
-
-    // ZarinPal Request API
-    const zarinpalResponse = await axios.post("https://api.zarinpal.com/pg/v4/payment/request.json", {
-      merchant_id: ZARINPAL_MERCHANT_ID,
-      amount: amount,
-      description: description,
-      callback_url: `${ZARINPAL_CALLBACK_HOST}/api/payment/verify?userId=${userId}&amount=${amount}&callbackUrl=${encodeURIComponent(callbackUrl)}`,
-      metadata: {
-        email: user.email,
-        mobile: user.phone_number,
-        userId: userId, // اضافه کردن userId به metadata
-      },
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    });
-
-    const data = zarinpalResponse.data;
-
-    if (data.data.code === 100) {
-      return res.json({
-        success: true,
-        paymentUrl: `https://www.zarinpal.com/pg/StartPay/${data.data.authority}`,
-      });
-    } else {
-      console.error("ZarinPal Request Error:", data.errors);
-      return res.status(400).json({
-        success: false,
-        message: data.errors.message || "خطا در ایجاد درخواست پرداخت از زرین‌پال.",
-      });
-    }
-  } catch (error) {
-    console.error("Payment Request Error:", error);
-    return res.status(500).json({ success: false, error: "خطای سرور هنگام شروع پرداخت." });
-  }
-});
-
-app.get("/payment/verify", async (req, res) => {
-  const { Authority, Status, userId, amount, callbackUrl } = req.query;
-
-  if (Status === "OK") {
-    try {
-      const db = await openDb();
-      const user = await db.get("SELECT id, is_premium, premium_expiry_date FROM users WHERE id = ?", [userId]);
-
-      if (!user) {
-        return res.redirect(`${decodeURIComponent(callbackUrl)}?payment_status=failed&message=${encodeURIComponent("کاربر یافت نشد.")}`);
-      }
-
-      // ZarinPal Verify API
-      const zarinpalResponse = await axios.post("https://api.zarinpal.com/pg/v4/payment/verify.json", {
-        merchant_id: ZARINPAL_MERCHANT_ID,
-        amount: parseFloat(amount),
-        authority: Authority,
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-
-      const data = zarinpalResponse.data;
-
-      if (data.data.code === 100) {
-        // Payment successful
-        const tariffSettings = await db.get("SELECT premium_user_default_days FROM tariff_settings LIMIT 1");
-        const premiumDurationDays = tariffSettings?.premium_user_default_days ?? 30;
-
-        let newExpiryDate = new Date();
-        if (user.is_premium && user.premium_expiry_date && new Date(user.premium_expiry_date) > newExpiryDate) {
-            // If already premium and has a future expiry, extend from current expiry
-            newExpiryDate = new Date(user.premium_expiry_date);
-        }
-        newExpiryDate.setDate(newExpiryDate.getDate() + premiumDurationDays);
-
-        await db.run(
-          "UPDATE users SET is_premium = 1, premium_expiry_date = ?, trial_activated_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-          [newExpiryDate.toISOString(), userId]
-        );
-        console.log(`User ${userId} successfully upgraded to premium. Expiry: ${newExpiryDate.toISOString()}`);
-        
-        // Restart user services to apply new premium status and limits
-        await startUserServices(userId);
-
-        return res.redirect(`${decodeURIComponent(callbackUrl)}?payment_status=success&message=${encodeURIComponent("پرداخت با موفقیت انجام شد و حساب شما پرمیوم شد!")}`);
-      } else {
-        // Payment failed or already verified
-        console.error("ZarinPal Verify Error:", data.errors);
-        return res.redirect(`${decodeURIComponent(callbackUrl)}?payment_status=failed&message=${encodeURIComponent(data.errors.message || "پرداخت ناموفق بود یا قبلا تایید شده است.")}`);
-      }
-    } catch (error) {
-      console.error("Payment Verification Error:", error);
-      return res.redirect(`${decodeURIComponent(callbackUrl)}?payment_status=failed&message=${encodeURIComponent("خطای سرور هنگام تأیید پرداخت.")}`);
-    }
-  } else {
-    // Payment cancelled by user
-    return res.redirect(`${decodeURIComponent(callbackUrl)}?payment_status=failed&message=${encodeURIComponent("پرداخت توسط کاربر لغو شد.")}`);
-  }
-});
-
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -438,7 +307,7 @@ process.on("SIGINT", async () => {
   }
   // Disconnect persistent clients from service-manager
   const {
-    persistentClients,
+    activeClients: persistentClients,
   } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
@@ -474,7 +343,7 @@ process.on("SIGTERM", async () => {
     }
   }
   const {
-    persistentClients,
+    activeClients: persistentClients,
   } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {

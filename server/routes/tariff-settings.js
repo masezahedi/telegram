@@ -58,7 +58,6 @@ router.put("/", async (req, res) => {
       premium_user_max_active_services,
       normal_user_max_channels_per_service,
       premium_user_max_channels_per_service,
-      premium_price, // NEW: Receive premium_price
     } = req.body;
 
     // Validate inputs
@@ -68,8 +67,7 @@ router.put("/", async (req, res) => {
       typeof normal_user_max_active_services !== "number" || normal_user_max_active_services < 0 ||
       typeof premium_user_max_active_services !== "number" || premium_user_max_active_services < 0 ||
       typeof normal_user_max_channels_per_service !== "number" || normal_user_max_channels_per_service < 0 ||
-      typeof premium_user_max_channels_per_service !== "number" || premium_user_max_channels_per_service < 0 ||
-      typeof premium_price !== "number" || premium_price < 0 // NEW: Validate premium_price
+      typeof premium_user_max_channels_per_service !== "number" || premium_user_max_channels_per_service < 0
     ) {
       return res.status(400).json({ success: false, error: "Invalid input values. All tariff settings must be non-negative numbers." });
     }
@@ -84,7 +82,6 @@ router.put("/", async (req, res) => {
         premium_user_max_active_services = ?,
         normal_user_max_channels_per_service = ?,
         premium_user_max_channels_per_service = ?,
-        premium_price = ?, -- NEW: Update premium_price
         updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
       `,
@@ -95,7 +92,6 @@ router.put("/", async (req, res) => {
         premium_user_max_active_services,
         normal_user_max_channels_per_service,
         premium_user_max_channels_per_service,
-        premium_price, // NEW: Pass premium_price value
       ]
     );
 
