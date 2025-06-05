@@ -2,14 +2,14 @@
 
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios"); // NEW: Import axios
+const axios = require("axios");
 const { Api } = require("telegram");
 const { verifyToken } = require("./utils/auth");
 const { createClient, activeClients } = require("./services/telegram/client");
 const {
   initializeAllServices,
   stopService,
-  startUserServices, // NEW: Import startUserServices
+  startUserServices,
 } = require("./services/telegram/service-manager");
 const {
   messageMaps,
@@ -222,13 +222,14 @@ app.post("/payment/request", async (req, res) => {
     }
 
     const { amount, description, callbackUrl } = req.body;
+    const userId = decoded.userId; // استخراج userId از توکن رمزگشایی شده
 
     if (!amount || amount <= 0 || !description || !callbackUrl) {
       return res.status(400).json({ success: false, error: "اطلاعات پرداخت ناقص است." });
     }
 
     const db = await openDb();
-    const user = await db.get("SELECT email, phone_number FROM users WHERE id = ?", [decoded.userId]);
+    const user = await db.get("SELECT email, phone_number FROM users WHERE id = ?", [userId]);
     if (!user) {
       return res.status(404).json({ success: false, error: "کاربر یافت نشد." });
     }
@@ -238,10 +239,11 @@ app.post("/payment/request", async (req, res) => {
       merchant_id: ZARINPAL_MERCHANT_ID,
       amount: amount,
       description: description,
-      callback_url: `${ZARINPAL_CALLBACK_HOST}/api/payment/verify?userId=${decoded.userId}&amount=${amount}&callbackUrl=${encodeURIComponent(callbackUrl)}`,
+      callback_url: `${ZARINPAL_CALLBACK_HOST}/api/payment/verify?userId=${userId}&amount=${amount}&callbackUrl=${encodeURIComponent(callbackUrl)}`,
       metadata: {
         email: user.email,
         mobile: user.phone_number,
+        userId: userId, // اضافه کردن userId به metadata
       },
     }, {
       headers: {
@@ -436,7 +438,7 @@ process.on("SIGINT", async () => {
   }
   // Disconnect persistent clients from service-manager
   const {
-    persistentClients, // Corrected import
+    persistentClients,
   } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
@@ -472,7 +474,7 @@ process.on("SIGTERM", async () => {
     }
   }
   const {
-    persistentClients, // Corrected import
+    persistentClients,
   } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
