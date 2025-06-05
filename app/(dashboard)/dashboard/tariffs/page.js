@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/services/auth-service";
-import { TariffService } from "@/lib/services/tariff-service"; // NEW
+import { TariffService } from "@/lib/services/tariff-service"; 
 import {
   Card,
   CardContent,
@@ -36,6 +36,7 @@ const formSchema = z.object({
   premium_user_max_active_services: z.coerce.number().min(0, "تعداد سرویس باید مثبت یا صفر باشد."),
   normal_user_max_channels_per_service: z.coerce.number().min(0, "تعداد کانال باید مثبت یا صفر باشد."),
   premium_user_max_channels_per_service: z.coerce.number().min(0, "تعداد کانال باید مثبت یا صفر باشد."),
+  premium_price: z.coerce.number().min(0, "مبلغ باید مثبت یا صفر باشد."), // NEW: Premium price field
 });
 
 export default function TariffSettings() {
@@ -53,6 +54,7 @@ export default function TariffSettings() {
       premium_user_max_active_services: 0,
       normal_user_max_channels_per_service: 0,
       premium_user_max_channels_per_service: 0,
+      premium_price: 0, // NEW: Default value for premium price
     },
   });
 
@@ -83,6 +85,7 @@ export default function TariffSettings() {
             premium_user_max_active_services: settings.premium_user_max_active_services,
             normal_user_max_channels_per_service: settings.normal_user_max_channels_per_service,
             premium_user_max_channels_per_service: settings.premium_user_max_channels_per_service,
+            premium_price: settings.premium_price, // NEW: Set premium price
           });
         }
       } catch (error) {
@@ -229,6 +232,23 @@ export default function TariffSettings() {
                         </FormControl>
                         <FormDescription>
                           حداکثر تعداد کانال‌های مبدا و مقصد که یک کاربر پرمیوم می‌تواند در یک سرویس تعریف کند.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                   {/* NEW: Premium Price Field */}
+                  <FormField
+                    control={form.control}
+                    name="premium_price"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>مبلغ قابل پرداخت پرمیوم (تومان)</FormLabel>
+                        <FormControl>
+                          <Input type="number" {...field} min="0" />
+                        </FormControl>
+                        <FormDescription>
+                          مبلغی که کاربران برای ارتقا به حساب پرمیوم پرداخت می‌کنند.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

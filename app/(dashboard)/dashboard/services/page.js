@@ -18,7 +18,8 @@ import DashboardLayout from "@/components/dashboard/dashboard-layout";
 import ForwardingServiceForm from "@/components/dashboard/services/forwarding-service-form";
 import ForwardingServiceList from "@/components/dashboard/services/forwarding-service-list";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { Info } from "lucide-react";
+import { Info, Award } from "lucide-react"; // NEW: Import Award icon
+import { Button } from '@/components/ui/button'; // NEW: Import Button
 
 export default function Services() {
   const router = useRouter();
@@ -134,6 +135,59 @@ export default function Services() {
     }
   }
 
+  // NEW: Logic for showing upgrade button
+  const showUpgradeButton =
+    user && !user.isAdmin && !user.isPremium && isTelegramConnected && isAccountExpired; // Only if not admin/premium, telegram connected, and account expired
+
+  const handleUpgradeToPremium = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/payment/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+        body: JSON.stringify({
+          amount: user?.tariffSettings?.premium_price || 100000,
+          description: "ارتقاء به حساب کاربری پرمیوم",
+          callbackUrl: `${window.location.origin}/dashboard/services?payment_status=success`, // Redirect back to services page
+        }),
+      });
+
+      const result = await response.json();
+      if (result.success && result.paymentUrl) {
+        window.location.href = result.paymentUrl;
+      } else {
+        toast.error(result.message || "خطا در شروع پرداخت. لطفاً دوباره تلاش کنید.");
+      }
+    } catch (error) {
+      console.error("Payment initiation error:", error);
+      toast.error("خطا در شروع پرداخت. لطفاً دوباره تلاش کنید.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check for payment status in URL on component mount
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('payment_status');
+    const paymentMessage = urlParams.get('message'); // Added to capture custom message
+
+    if (paymentStatus === 'success') {
+      toast.success(paymentMessage || 'پرداخت با موفقیت انجام شد و حساب شما پرمیوم شد!');
+      // Clean up URL
+      router.replace('/dashboard/services', undefined, { shallow: true });
+      fetchUserAndSetState(); // Re-fetch user data to reflect premium status
+    } else if (paymentStatus === 'failed') {
+      toast.error(paymentMessage || 'پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.');
+      // Clean up URL
+      router.replace('/dashboard/services', undefined, { shallow: true });
+      fetchUserAndSetState(); // Re-fetch user data in case state changed
+    }
+  }, []); // Run only once on mount
+
 
   if (loading) {
     return (
@@ -174,6 +228,21 @@ export default function Services() {
               </AlertDescription>
             </Alert>
           )}
+
+        {/* NEW: Upgrade to Premium Button */}
+        {showUpgradeButton && (
+          <div className="mb-4 text-center">
+            <Button
+              onClick={handleUpgradeToPremium}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground gap-x-2"
+              disabled={loading}
+            >
+              <Award className="h-5 w-5" />
+              {loading ? "در حال انتقال به درگاه..." : `ارتقا به پرمیوم (${(user?.tariffSettings?.premium_price || 0).toLocaleString()} تومان)`}
+            </Button>
+          </div>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>سرویس‌های شما</CardTitle>
