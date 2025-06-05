@@ -199,12 +199,7 @@ export default function TelegramConnection({ user, onUserUpdate }) { // Added on
         if (onUserUpdate) {
           const updatedUser = await UserService.getCurrentUser(); // Fetch the latest user data
           if (updatedUser?.user) {
-            onUserUpdate({
-              ...updatedUser.user,
-              isTelegramConnected: Boolean(updatedUser.user.telegram_session),
-              isAdmin: Boolean(updatedUser.user.is_admin), // Ensure boolean conversion
-              isPremium: Boolean(updatedUser.user.is_premium), // Ensure boolean conversion
-            });
+            onUserUpdate(updatedUser.user);
           }
         }
       } else {
@@ -236,12 +231,7 @@ export default function TelegramConnection({ user, onUserUpdate }) { // Added on
         if (onUserUpdate) {
           const updatedUser = await UserService.getCurrentUser(); // Fetch the latest user data
           if (updatedUser?.user) {
-            onUserUpdate({
-              ...updatedUser.user,
-              isTelegramConnected: Boolean(updatedUser.user.telegram_session),
-              isAdmin: Boolean(updatedUser.user.is_admin), // Ensure boolean conversion
-              isPremium: Boolean(updatedUser.user.is_premium), // Ensure boolean conversion
-            });
+            onUserUpdate(updatedUser.user);
           }
         }
       } else {

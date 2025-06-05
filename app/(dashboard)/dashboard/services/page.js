@@ -34,8 +34,8 @@ export default function Services() {
       localStorage.setItem("user", JSON.stringify({
         ...userDataResponse.user,
         isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session
-        isAdmin: Boolean(userDataResponse.user.is_admin), // Corrected to is_admin
-        isPremium: Boolean(userDataResponse.user.is_premium), // Corrected to is_premium
+        isAdmin: Boolean(userDataResponse.user.isAdmin),
+        isPremium: Boolean(userDataResponse.user.isPremium),
       }));
       setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
     } else {
@@ -64,11 +64,6 @@ export default function Services() {
     };
 
     checkAuthAndLoadUser();
-
-    // Setup polling for user data here too
-    const intervalId = setInterval(fetchUserAndSetState, 60 * 1000); // Poll every 1 minute
-
-    return () => clearInterval(intervalId); // Cleanup on unmount
   }, [router]);
 
   // This function will be called after a service is created/updated or status changed
@@ -86,51 +81,52 @@ export default function Services() {
   const normalUserTrialDays = user?.tariffSettings?.normalUserTrialDays ?? 15;
   const isTelegramConnected = user?.isTelegramConnected;
 
+  // NEW: Determine the effective expiry date for the user
   const now = new Date();
-  const userPremiumExpiryDate = user?.premiumExpiryDate ? new Date(user.premiumExpiryDate) : null;
-  const isTrialActivated = Boolean(user?.trialActivatedAt);
+  let effectiveExpiryDate = null;
+  let isTrialActivated = Boolean(user?.trialActivatedAt); // Check if trial was ever activated
 
   if (user && !user.isAdmin) {
-    if (userPremiumExpiryDate) {
-      if (now >= userPremiumExpiryDate) {
-        isAccountExpired = true;
-        alertVariant = "destructive";
-        if (user.isPremium) {
-            accountStatusMessage = `اشتراک پرمیوم شما منقضی شده است.`;
-        } else {
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما منقضی شده است.`;
-        }
+    if (user.isPremium) {
+      if (user.premiumExpiryDate) {
+        effectiveExpiryDate = new Date(user.premiumExpiryDate);
+        accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${effectiveExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} معتبر است.`;
       } else {
-        // Account is not expired
-        if (user.isPremium) {
-            accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} معتبر است.`;
-        } else if (isTrialActivated) {
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} فعال است.`;
-        }
+        accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`; // Or a specific default if no expiry date
       }
-    } else {
-      // No premiumExpiryDate: means either trial not activated or lifetime premium (if isPremium is true)
-      if (user.isPremium) {
-        accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`;
+    } else { // Normal user
+      if (isTrialActivated) {
+        const trialActivatedDate = new Date(user.trialActivatedAt);
+        const calculatedTrialExpiry = new Date(trialActivatedDate);
+        calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+        effectiveExpiryDate = calculatedTrialExpiry;
+        accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${effectiveExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} فعال است.`;
       } else {
-        // Normal user, no premiumExpiryDate implies trial not activated or expired
-        if (isTrialActivated) { // Should not happen if premiumExpiryDate is always set on trial activation
-            isAccountExpired = true; // Fallback: if trial activated but no expiry date, assume expired
-            alertVariant = "destructive";
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما منقضی شده است.`;
-        } else {
-            accountStatusMessage = `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
-        }
+        accountStatusMessage = `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
       }
     }
 
-    if (!isTelegramConnected) {
+    // Check if account is expired based on the determined effectiveExpiryDate
+    if (effectiveExpiryDate && now >= effectiveExpiryDate) {
+        isAccountExpired = true;
+        alertVariant = "destructive";
+        accountStatusMessage = accountStatusMessage.replace("فعال است.", "منقضی شده است."); // Adjust message for expiry
+        accountStatusMessage = accountStatusMessage.replace("معتبر است.", "منقضی شده است."); // Adjust message for expiry
+    } else if (!effectiveExpiryDate && !user.isPremium && isTrialActivated) {
+        // This case should ideally not happen if trial activation always sets premiumExpiryDate
+        // But as a safeguard, if trial was activated but no expiry date, assume expired for now.
+        isAccountExpired = true;
+        alertVariant = "destructive";
+        accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما به پایان رسیده است.`;
+    } else if (!isTelegramConnected) {
         alertVariant = "warning";
         accountStatusMessage = `برای استفاده از سرویس‌ها، لطفاً ابتدا حساب تلگرام خود را متصل کنید.`;
-    } else if (!user.isPremium && !isTrialActivated && isTelegramConnected && !userPremiumExpiryDate) {
+    } else if (!user.isPremium && !isTrialActivated && isTelegramConnected) {
         // Specific message for normal user, trial not activated, but telegram connected
         alertVariant = "info";
         accountStatusMessage = `شما کاربر عادی هستید. برای شروع استفاده از سرویس‌ها، لطفاً مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`;
+    } else {
+        alertVariant = "default";
     }
   }
 
