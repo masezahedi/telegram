@@ -8,6 +8,8 @@ const { createClient, activeClients } = require("./services/telegram/client");
 const {
   initializeAllServices,
   stopService,
+  stopUserServices, // Import stopUserServices
+  copyHistoryTasks, // Import copyHistoryTasks to check for running tasks
 } = require("./services/telegram/service-manager");
 const {
   messageMaps,
@@ -254,7 +256,7 @@ async function checkAndExpireServices() {
       );
 
       const userServices = await db.all(
-        "SELECT id FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+        "SELECT id, type, copy_history FROM forwarding_services WHERE user_id = ? AND is_active = 1",
         [user.id]
       );
       for (const service of userServices) {
@@ -267,6 +269,7 @@ async function checkAndExpireServices() {
         );
         try {
           // IMPORTANT: Call stopService from service-manager to actually stop the active process
+          // This will also stop copy history tasks if running for this service
           await stopService(user.id, service.id);
         } catch (err) {
           console.error(
@@ -278,6 +281,13 @@ async function checkAndExpireServices() {
       // TODO: Notify user about expiry (e.g., via Telegram if session is valid or email)
     }
 
+    // 2. Handle copy history services that have completed their copying task
+    // This check is now integrated within startCopyHistory's finally block to set is_active = 0
+    // and call stopService once the copy is done. This means services will be deactivated right after completion.
+
+    // A periodic check can still be useful for any lingering tasks or edge cases,
+    // but the primary deactivation for completed copies happens immediately.
+    // For now, we will rely on the in-task deactivation.
     console.log("✅ Finished checking for expired accounts and services.");
   } catch (error) {
     console.error("❌ Error in checkAndExpireServices:", error);
@@ -306,9 +316,7 @@ process.on("SIGINT", async () => {
     }
   }
   // Disconnect persistent clients from service-manager
-  const {
-    activeClients: persistentClients,
-  } = require("./services/telegram/client");
+  const { persistentClients } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
       try {
@@ -318,6 +326,14 @@ process.on("SIGINT", async () => {
       }
     }
   }
+  // Stop all running copy history tasks forcefully on shutdown
+  for (const [taskId, task] of copyHistoryTasks.entries()) {
+      if (task.processing) {
+          console.log(`Force stopping running copy task ${taskId} on server shutdown.`);
+          task.cancel();
+      }
+  }
+
   console.log("✅ Data saved. Exiting...");
   process.exit(0);
 });
@@ -342,9 +358,7 @@ process.on("SIGTERM", async () => {
       }
     }
   }
-  const {
-    activeClients: persistentClients,
-  } = require("./services/telegram/client");
+  const { persistentClients } = require("./services/telegram/client");
   for (const client of persistentClients.values()) {
     if (client && typeof client.disconnect === "function") {
       try {
@@ -354,12 +368,19 @@ process.on("SIGTERM", async () => {
       }
     }
   }
+    // Stop all running copy history tasks forcefully on shutdown
+    for (const [taskId, task] of copyHistoryTasks.entries()) {
+        if (task.processing) {
+            console.log(`Force stopping running copy task ${taskId} on server shutdown.`);
+            task.cancel();
+        }
+    }
   console.log("✅ Data saved. Exiting...");
   process.exit(0);
 });
 
 // Initialize all services on server start (from service-manager)
-require("./services/telegram/service-manager").initializeAllServices();
+initializeAllServices();
 
 const EXPIRY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
 // const EXPIRY_CHECK_INTERVAL = 30 * 1000; // For testing: 30 seconds

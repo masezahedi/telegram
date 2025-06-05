@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, Info, MessageCircle, Play, StopCircle } from "lucide-react"; // Import Play and StopCircle
 import {
   Table,
   TableBody,
@@ -32,6 +32,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [loading, setLoading] = useState(true);
   const [editingService, setEditingService] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [processingServiceId, setProcessingServiceId] = useState(null); // New state to track which service is being processed
 
   // Extract tariff settings and user status
   const normalUserTrialDays = userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
@@ -91,11 +92,18 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     loadServices();
   }, []);
 
-  const handleStatusChange = async (id, newIsActiveStatus) => {
-    // Check if activating or deactivating
+  const handleStatusChange = async (id, newIsActiveStatus, serviceType, copyHistoryEnabled) => {
+    // For 'copy' services with copyHistory enabled, we don't use the generic switch.
+    // Their activation/deactivation is handled by specific start/stop history buttons.
+    if (serviceType === 'copy' && copyHistoryEnabled) {
+      return; // Do nothing for these cases, as they have dedicated buttons
+    }
+
+    setProcessingServiceId(id);
     if (newIsActiveStatus) { // User is trying to ACTIVATE a service
       if (!isTelegramConnected) {
         toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
+        setProcessingServiceId(null);
         await loadServices(); // Reload to revert UI if toast prevents action
         return;
       }
@@ -104,6 +112,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
           toast.error(
             "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد. لطفاً اشتراک خود را ارتقا دهید."
           );
+          setProcessingServiceId(null);
           await loadServices();
           return;
         }
@@ -111,13 +120,14 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
           toast.error(
             `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
           );
+          setProcessingServiceId(null);
           await loadServices();
           return;
         }
       }
     }
 
-    // Check active service limit if activating
+    // Check active service limit if activating (only for non-copy-history services)
     if (newIsActiveStatus && !isAdmin) {
       const currentActiveServices = services.filter(s => s.is_active).length;
       const maxActiveServices = isPremium
@@ -128,6 +138,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
         toast.error(
           `شما به حداکثر تعداد سرویس‌های فعال (${maxActiveServices}) رسیده‌اید. برای فعال‌سازی این سرویس، لطفاً ابتدا یک سرویس دیگر را غیرفعال کنید.`
         );
+        setProcessingServiceId(null);
         await loadServices();
         return;
       }
@@ -154,6 +165,46 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       console.error("Update service status error:", error);
       toast.error("خطا در تغییر وضعیت سرویس");
       await loadServices();
+    } finally {
+      setProcessingServiceId(null);
+    }
+  };
+
+  const handleStartCopyHistory = async (id) => {
+    setProcessingServiceId(id);
+    try {
+        const result = await ForwardingService.startCopyHistory(id);
+        if (result.success) {
+            toast.success("کپی تاریخچه شروع شد. پس از اتمام به طور خودکار متوقف می‌شود.");
+            await loadServices();
+            onUpdate?.();
+        } else {
+            toast.error(result.error || "خطا در شروع کپی تاریخچه.");
+        }
+    } catch (error) {
+        console.error("Error starting copy history:", error);
+        toast.error("خطا در شروع کپی تاریخچه.");
+    } finally {
+        setProcessingServiceId(null);
+    }
+  };
+
+  const handleStopCopyHistory = async (id) => {
+    setProcessingServiceId(id);
+    try {
+        const result = await ForwardingService.stopCopyHistory(id);
+        if (result.success) {
+            toast.success("کپی تاریخچه متوقف شد.");
+            await loadServices();
+            onUpdate?.();
+        } else {
+            toast.error(result.error || "خطا در توقف کپی تاریخچه.");
+        }
+    } catch (error) {
+        console.error("Error stopping copy history:", error);
+        toast.error("خطا در توقف کپی تاریخچه.");
+    } finally {
+        setProcessingServiceId(null);
     }
   };
 
@@ -372,113 +423,201 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {services.map((service) => (
-                  <TableRow key={service.id} className="hover:bg-muted/50">
-                    <TableCell className="text-right font-medium py-3 ps-4">
-                      {service.name}
-                    </TableCell>
-                    <TableCell className="text-right py-3">
-                      <Badge
-                        variant={
-                          service.type === "copy" ? "secondary" : "default"
-                        }
-                        className="whitespace-nowrap"
-                      >
-                        {service.type === "copy"
-                          ? "کپی کانال"
-                          : "فوروارد خودکار"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right py-3 max-w-xs truncate">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-default">
+                {services.map((service) => {
+                    const isCopyServiceWithHistory = service.type === 'copy' && service.copy_history;
+                    const disableGeneralSwitch = disableSwitchDueToLimits(service) || isCopyServiceWithHistory;
+                    const isProcessingThisService = processingServiceId === service.id;
+
+                  return (
+                    <TableRow key={service.id} className="hover:bg-muted/50">
+                      <TableCell className="text-right font-medium py-3 ps-4">
+                        {service.name}
+                      </TableCell>
+                      <TableCell className="text-right py-3">
+                        <Badge
+                          variant={
+                            service.type === "copy" ? "secondary" : "default"
+                          }
+                          className="whitespace-nowrap"
+                        >
+                          {service.type === "copy"
+                            ? "کپی کانال"
+                            : "فوروارد خودکار"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right py-3 max-w-xs truncate">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-default">
+                              {(Array.isArray(service.source_channels)
+                                ? service.source_channels
+                                : []
+                              ).join("، ")}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-right">
+                            {" "}
                             {(Array.isArray(service.source_channels)
                               ? service.source_channels
                               : []
-                            ).join("، ")}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-right">
-                          {" "}
-                          {(Array.isArray(service.source_channels)
-                            ? service.source_channels
-                            : []
-                          ).map((ch) => (
-                            <div key={ch}>{ch}</div>
-                          ))}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className="text-right py-3 max-w-xs truncate">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-default">
+                            ).map((ch) => (
+                              <div key={ch}>{ch}</div>
+                            ))}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell className="text-right py-3 max-w-xs truncate">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-default">
+                              {(Array.isArray(service.target_channels)
+                                ? service.target_channels
+                                : []
+                              ).join("، ")}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-right">
                             {(Array.isArray(service.target_channels)
                               ? service.target_channels
                               : []
-                            ).join("، ")}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-right">
-                          {(Array.isArray(service.target_channels)
-                            ? service.target_channels
-                            : []
-                          ).map((ch) => (
-                            <div key={ch}>{ch}</div>
-                          ))}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className="text-right py-3">
-                      <Switch
-                        checked={Boolean(service.is_active)}
-                        onCheckedChange={(checked) =>
-                          handleStatusChange(service.id, checked)
-                        }
-                        disabled={disableSwitchDueToLimits(service)}
-                        aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
-                        dir="ltr"
-                      />
-                    </TableCell>
-                    <TableCell className="text-center py-3 pe-4">
-                      <div className="flex justify-center gap-x-1">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(service)}
-                              disabled={!isAdmin && (isAccountExpired || !isTrialActuallyActivated || !isTelegramConnected)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                              <span className="sr-only">ویرایش</span>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>ویرایش سرویس</p>
+                            ).map((ch) => (
+                              <div key={ch}>{ch}</div>
+                            ))}
                           </TooltipContent>
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive/90"
-                              onClick={() => handleDelete(service.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              <span className="sr-only">حذف</span>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>حذف سرویس</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell className="text-right py-3">
+                        {isCopyServiceWithHistory ? (
+                            service.is_active ? (
+                                <Badge variant="default" className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-400 whitespace-nowrap">
+                                    در حال کپی
+                                </Badge>
+                            ) : (
+                                service.service_activated_at ? (
+                                    <Badge variant="default" className="bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-400 whitespace-nowrap">
+                                        کپی انجام شد
+                                    </Badge>
+                                ) : (
+                                    <Badge variant="default" className="bg-orange-100 text-orange-700 dark:bg-orange-700/30 dark:text-orange-400 whitespace-nowrap">
+                                        آماده کپی
+                                    </Badge>
+                                )
+                            )
+                        ) : (
+                          <Switch
+                            checked={Boolean(service.is_active)}
+                            onCheckedChange={(checked) =>
+                              handleStatusChange(service.id, checked, service.type, service.copy_history)
+                            }
+                            disabled={disableGeneralSwitch || isProcessingThisService}
+                            aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
+                            dir="ltr"
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center py-3 pe-4">
+                        <div className="flex justify-center gap-x-1">
+                            {isCopyServiceWithHistory ? (
+                                service.is_active ? (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="destructive"
+                                                size="icon"
+                                                onClick={() => handleStopCopyHistory(service.id)}
+                                                disabled={isProcessingThisService || !isTelegramConnected || isAccountExpired || (!isPremium && !isTrialActuallyActivated)}
+                                            >
+                                                {isProcessingThisService ? (
+                                                  <div className="h-4 w-4 rounded-full border-2 border-current border-r-transparent animate-spin" />
+                                                ) : (
+                                                  <StopCircle className="h-4 w-4" />
+                                                )}
+                                                <span className="sr-only">توقف کپی</span>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            <p>توقف کپی تاریخچه</p>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                ) : (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="default"
+                                                size="icon"
+                                                onClick={() => handleStartCopyHistory(service.id)}
+                                                disabled={service.service_activated_at || isProcessingThisService || !isTelegramConnected || isAccountExpired || (!isPremium && !isTrialActuallyActivated)}
+                                            >
+                                                {isProcessingThisService ? (
+                                                  <div className="h-4 w-4 rounded-full border-2 border-current border-r-transparent animate-spin" />
+                                                ) : (
+                                                  <Play className="h-4 w-4" />
+                                                )}
+                                                <span className="sr-only">شروع کپی</span>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            <p>شروع کپی تاریخچه</p>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                )
+                            ) : (
+                                 <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Switch
+                                            checked={Boolean(service.is_active)}
+                                            onCheckedChange={(checked) =>
+                                                handleStatusChange(service.id, checked, service.type, service.copy_history)
+                                            }
+                                            disabled={disableGeneralSwitch || isProcessingThisService}
+                                            aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
+                                            dir="ltr"
+                                        />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{service.is_active ? "غیرفعال کردن سرویس" : "فعال کردن سرویس"}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            )}
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(service)}
+                                disabled={!isAdmin && (isAccountExpired || !isTrialActuallyActivated || !isTelegramConnected || service.is_active)} // Disable edit if active
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span className="sr-only">ویرایش</span>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>ویرایش سرویس</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:text-destructive/90"
+                                onClick={() => handleDelete(service.id)}
+                                disabled={isProcessingThisService} // Disable delete if processing
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="sr-only">حذف</span>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>حذف سرویس</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

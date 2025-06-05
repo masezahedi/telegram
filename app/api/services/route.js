@@ -5,7 +5,9 @@ import { openDb } from "@/lib/db";
 import {
   stopService,
   startUserServices,
-} from "@/server/services/telegram/service-manager";
+  startCopyHistory, // Import the startCopyHistory function
+  stopCopyHistoryTask, // Import a function to stop copy history task specifically if needed
+} from "@/server/services/telegram/service-manager"; // Ensure this is imported
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,7 @@ export async function GET(request) {
         history_direction: service.history_direction ?? "newest",
         start_from_id: service.start_from_id,
         copy_direction: service.copy_direction ?? "before",
-        service_activated_at: service.service_activated_at,
+        service_activated_at: service.service_activated_at, // Ensure this is passed
       })),
     });
   } catch (error) {
@@ -227,7 +229,7 @@ export async function PUT(request) {
       );
     }
 
-    const { id: serviceIdToUpdate, isActive } = await request.json();
+    const { id: serviceIdToUpdate, isActive, isCopyHistoryStart, isCopyHistoryStop } = await request.json();
     const db = await openDb();
     const user = await db.get(
       "SELECT id, is_admin, is_premium, premium_expiry_date, trial_activated_at, telegram_session FROM users WHERE id = ?",
@@ -242,7 +244,7 @@ export async function PUT(request) {
     }
 
     // NEW LOGIC: Check if Telegram is connected before allowing service activation
-    if (!user.telegram_session && isActive) {
+    if (!user.telegram_session) {
       return NextResponse.json(
         { success: false, error: "لطفاً ابتدا حساب تلگرام خود را متصل کنید." },
         { status: 403 }
@@ -361,9 +363,15 @@ export async function PUT(request) {
     let updateServiceSQL = `UPDATE forwarding_services SET is_active = ?, updated_at = CURRENT_TIMESTAMP`;
     const updateServiceParams = [isActive ? 1 : 0];
 
-    if (isActive) {
+    // If activating for the first time or reactivating a "forward" service
+    if (isActive && !serviceToUpdate.activated_at) {
       updateServiceSQL += `, activated_at = CURRENT_TIMESTAMP`;
     }
+    // If it's a copy service and being activated for history copy for the first time
+    if (isActive && serviceToUpdate.type === 'copy' && serviceToUpdate.copy_history && !serviceToUpdate.service_activated_at) {
+        updateServiceSQL += `, service_activated_at = CURRENT_TIMESTAMP`;
+    }
+
 
     updateServiceSQL += ` WHERE id = ? AND user_id = ?`;
     updateServiceParams.push(serviceIdToUpdate, decoded.userId);
@@ -375,16 +383,33 @@ export async function PUT(request) {
           `🟢 Activating service ${serviceIdToUpdate} for user ${decoded.userId}`
         );
         await startUserServices(decoded.userId);
+
+        // NEW LOGIC: If it's a copy service with history copy enabled and this is the trigger
+        if (serviceToUpdate.type === 'copy' && serviceToUpdate.copy_history && isCopyHistoryStart) {
+            console.log(`📚 Initiating history copy for service ${serviceIdToUpdate}`);
+            // Fetch updated service details to ensure service_activated_at is set for the task
+            const updatedService = await db.get("SELECT * FROM forwarding_services WHERE id = ?", [serviceIdToUpdate]);
+            if (updatedService) {
+                await startCopyHistory(updatedService, await require('@/server/services/telegram/client').getOrCreateClient(decoded.userId, user.telegram_session), decoded.userId);
+            }
+        }
       } else {
         console.log(
           `🔴 Deactivating service ${serviceIdToUpdate} for user ${decoded.userId}`
         );
         await stopService(decoded.userId, serviceIdToUpdate);
+        // If it's a copy service and being stopped manually, stop the history copy task too
+        if (serviceToUpdate.type === 'copy' && serviceToUpdate.copy_history && isCopyHistoryStop) {
+            await stopCopyHistoryTask(decoded.userId, serviceIdToUpdate);
+            console.log(`🛑 Stopped history copy task for service ${serviceIdToUpdate} manually.`);
+        }
       }
     } catch (serviceError) {
       console.error("Service control error:", serviceError);
-      // Even if service control fails, we still return success if DB update was fine
-      // Or you might want to revert DB status if service control is critical
+      return NextResponse.json(
+        { success: false, error: serviceError.message || "خطا در بروزرسانی وضعیت سرویس" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true });
@@ -414,7 +439,7 @@ export async function DELETE(request) {
 
     try {
       console.log(`🗑️ Stopping service ${id} before deletion`);
-      await stopService(decoded.userId, id);
+      await stopService(decoded.userId, id); // Ensure service is stopped and resources freed
     } catch (serviceError) {
       console.error("Error stopping service before deletion:", serviceError);
     }
