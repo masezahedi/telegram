@@ -30,7 +30,7 @@ export default function Profile() {
           // Update localStorage with fresh user data which now includes tariffSettings
           localStorage.setItem("user", JSON.stringify({
             ...userDataResponse.user,
-            isTelegramConnected: Boolean(userDataResponse.user.telegramSession),
+            isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session
             isAdmin: Boolean(userDataResponse.user.isAdmin),
             isPremium: Boolean(userDataResponse.user.isPremium),
           }));
