@@ -69,7 +69,8 @@ export default function TariffSettings() {
         }
 
         const loggedInUser = AuthService.getStoredUser();
-        if (!loggedInUser?.isAdmin) {
+        // Ensure isAdmin is correctly evaluated
+        if (!loggedInUser || !loggedInUser.isAdmin) {
           toast.error("دسترسی غیر مجاز. شما ادمین نیستید.");
           router.replace("/dashboard");
           return;

@@ -18,8 +18,8 @@ import DashboardLayout from "@/components/dashboard/dashboard-layout";
 import ForwardingServiceForm from "@/components/dashboard/services/forwarding-service-form";
 import ForwardingServiceList from "@/components/dashboard/services/forwarding-service-list";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { Info, Award } from "lucide-react"; // NEW: Import Award icon
-import { Button } from '@/components/ui/button'; // NEW: Import Button
+import { Info, Award } from "lucide-react";
+import { Button } from '@/components/ui/button';
 
 export default function Services() {
   const router = useRouter();
@@ -31,14 +31,16 @@ export default function Services() {
     // Always fetch fresh user data to ensure up-to-date status
     const userDataResponse = await UserService.getCurrentUser();
     if (userDataResponse?.user) {
-      // Update local storage with fresh data, including tariff settings
-      localStorage.setItem("user", JSON.stringify({
+      // Update localStorage with fresh data, including tariff settings
+      // Ensure boolean conversions are handled here for consistency across components
+      const updatedUser = {
         ...userDataResponse.user,
-        isTelegramConnected: Boolean(userDataResponse.user.telegram_session), // Use telegram_session
-        isAdmin: Boolean(userDataResponse.user.is_admin), // Corrected to is_admin
-        isPremium: Boolean(userDataResponse.user.is_premium), // Corrected to is_premium
-      }));
-      setUser(AuthService.getStoredUser()); // Get the updated user object from local storage
+        isTelegramConnected: Boolean(userDataResponse.user.telegram_session),
+        isAdmin: Boolean(userDataResponse.user.isAdmin), // Already Boolean from API if correct
+        isPremium: Boolean(userDataResponse.user.isPremium), // Already Boolean from API if correct
+      };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      setUser(updatedUser); // Directly set the updated user object
     } else {
       toast.error("خطا در دریافت اطلاعات کاربر.");
       router.replace("/login");
@@ -66,7 +68,7 @@ export default function Services() {
 
     checkAuthAndLoadUser();
 
-    // Setup polling for user data here too
+    // Setup polling interval
     const intervalId = setInterval(fetchUserAndSetState, 60 * 1000); // Poll every 1 minute
 
     return () => clearInterval(intervalId); // Cleanup on unmount
@@ -89,55 +91,56 @@ export default function Services() {
 
   const now = new Date();
   const userPremiumExpiryDate = user?.premiumExpiryDate ? new Date(user.premiumExpiryDate) : null;
-  const isTrialActivated = Boolean(user?.trialActivatedAt);
+  const isTrialActivated = Boolean(user?.trialActivatedAt); // Ensure boolean conversion
 
   if (user && !user.isAdmin) {
-    if (userPremiumExpiryDate) {
-      if (now >= userPremiumExpiryDate) {
+    if (user.isPremium) {
+      if (userPremiumExpiryDate && now >= userPremiumExpiryDate) {
         isAccountExpired = true;
         alertVariant = "destructive";
-        if (user.isPremium) {
-            accountStatusMessage = `اشتراک پرمیوم شما منقضی شده است.`;
-        } else {
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما منقضی شده است.`;
-        }
+        accountStatusMessage = `اشتراک پرمیوم شما منقضی شده است.`;
+      } else if (userPremiumExpiryDate) {
+        accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} معتبر است.`;
       } else {
-        // Account is not expired
-        if (user.isPremium) {
-            accountStatusMessage = `اشتراک پرمیوم شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} معتبر است.`;
-        } else if (isTrialActivated) {
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} فعال است.`;
-        }
-      }
-    } else {
-      // No premiumExpiryDate: means either trial not activated or lifetime premium (if isPremium is true)
-      if (user.isPremium) {
+        // This case implies lifetime premium if premium_expiry_date is null for a premium user
         accountStatusMessage = `شما کاربر پرمیوم بدون محدودیت زمانی هستید.`;
-      } else {
-        // Normal user, no premiumExpiryDate implies trial not activated or expired
-        if (isTrialActivated) { // Should not happen if premiumExpiryDate is always set on trial activation
-            isAccountExpired = true; // Fallback: if trial activated but no expiry date, assume expired
-            alertVariant = "destructive";
-            accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما منقضی شده است.`;
+      }
+    } else { // Not premium
+      if (isTrialActivated) {
+        // If trial activated, premiumExpiryDate should be set to trial end date
+        if (userPremiumExpiryDate && now >= userPremiumExpiryDate) {
+          isAccountExpired = true;
+          alertVariant = "destructive";
+          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما منقضی شده است.`;
+        } else if (userPremiumExpiryDate) {
+          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما تا تاریخ ${userPremiumExpiryDate.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })} فعال است.`;
         } else {
-            accountStatusMessage = `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
+          // Fallback for unexpected state: trial activated but no expiry date.
+          // Treat as expired to be safe.
+          isAccountExpired = true;
+          alertVariant = "destructive";
+          accountStatusMessage = `مهلت استفاده ${normalUserTrialDays} روزه شما فعال شده اما تاریخ انقضا نامشخص است. لطفاً با پشتیبانی تماس بگیرید.`;
         }
+      } else {
+        // Normal user, trial not activated
+        isAccountExpired = true; // For display purposes, it's "expired" because no active period
+        alertVariant = "info"; // Use info for "please activate trial"
+        accountStatusMessage = `شما کاربر عادی هستید. با فعال‌سازی مهلت ${normalUserTrialDays} روزه، می‌توانید از امکانات سایت استفاده کنید.`;
       }
     }
 
+    // Override messages if Telegram is not connected
     if (!isTelegramConnected) {
-        alertVariant = "warning";
-        accountStatusMessage = `برای استفاده از سرویس‌ها، لطفاً ابتدا حساب تلگرام خود را متصل کنید.`;
-    } else if (!user.isPremium && !isTrialActivated && isTelegramConnected && !userPremiumExpiryDate) {
-        // Specific message for normal user, trial not activated, but telegram connected
-        alertVariant = "info";
-        accountStatusMessage = `شما کاربر عادی هستید. برای شروع استفاده از سرویس‌ها، لطفاً مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`;
+      alertVariant = "warning";
+      accountStatusMessage = `برای استفاده از سرویس‌ها، لطفاً ابتدا حساب تلگرام خود را متصل کنید.`;
+      isAccountExpired = true; // Consider expired for service usage if telegram not connected
     }
   }
 
-  // NEW: Logic for showing upgrade button
+
+  // Logic for showing upgrade button
   const showUpgradeButton =
-    user && !user.isAdmin && !user.isPremium && isTelegramConnected && isAccountExpired; // Only if not admin/premium, telegram connected, and account expired
+    user && !user.isAdmin && !user.isPremium && isTelegramConnected && isAccountExpired;
 
   const handleUpgradeToPremium = async () => {
     setLoading(true);
@@ -207,7 +210,7 @@ export default function Services() {
           accountStatusMessage && (
             <Alert
               className={`mb-4 ${
-                isAccountExpired
+                isAccountExpired && alertVariant === "destructive"
                   ? "border-destructive text-destructive [&>svg]:text-destructive"
                   : (alertVariant === "info" ? "border-info text-info [&>svg]:text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400" :
                     (alertVariant === "warning" ? "border-warning text-warning [&>svg]:text-warning dark:border-yellow-700 dark:text-yellow-300 dark:[&>svg]:text-yellow-400" :
@@ -219,11 +222,11 @@ export default function Services() {
             >
               <Info className="h-4 w-4" />
               <AlertTitle>
-                {isAccountExpired ? "مهلت استفاده به پایان رسیده" : "وضعیت اشتراک"}
+                {isAccountExpired && alertVariant === "destructive" ? "مهلت استفاده به پایان رسیده" : "وضعیت اشتراک"}
               </AlertTitle>
               <AlertDescription>
                 {accountStatusMessage}{" "}
-                {isAccountExpired &&
+                {isAccountExpired && alertVariant === "destructive" &&
                   " برای استفاده مجدد، لطفاً اشتراک خود را ارتقا دهید یا با پشتیبانی تماس بگیرید."}
               </AlertDescription>
             </Alert>
