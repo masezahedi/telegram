@@ -17,8 +17,8 @@ const activeServices = new Map();
 // Store user event handlers (one per user)
 const userEventHandlers = new Map();
 // Store copy history tasks
-const copyHistoryTasks = new Map(); // serviceId -> { active: boolean, processing: boolean, cancel: () => void }
-const lastCopyHistoryRunTimestamp = new Map(); // serviceId -> timestamp
+const copyHistoryTasks = new Map();
+const lastCopyHistoryRunTimestamp = new Map();
 const MIN_INTERVAL_BETWEEN_COPY_HISTORY_RUNS = 5 * 60 * 1000; // 5 دقیقه
 
 // 🔥 NEW: Cache برای جلوگیری از پردازش تکراری پیام‌ها
@@ -122,13 +122,6 @@ async function createUserEventHandler(userId, services, client) {
           const service = serviceData.service;
           const sourceChannels = JSON.parse(service.source_channels);
 
-          // Skip copy services with copy_history enabled unless explicitly designed for ongoing new messages
-          // For now, if copy_history is true, we assume it's a one-time copy and won't process new messages through event handler
-          if (service.type === 'copy' && service.copy_history) {
-            console.log(`⏭️ Service ${serviceId} is a copy service with history. Skipping real-time message processing.`);
-            continue;
-          }
-
           let isFromThisServiceSource = false;
           const matchedSourceChannelIds = [];
 
@@ -230,50 +223,196 @@ async function startForwardingService(service, client, geminiApiKey) {
   }
 }
 
-// 🔥 NEW: Function to start copy history (called from API route)
+async function startUserServices(userId) {
+  try {
+    console.log(`🚀 Starting services for user ${userId}`);
+
+    const db = await openDb();
+
+    const user = await db.get(
+      `
+      SELECT u.telegram_session, us.gemini_api_key,
+             u.is_admin, u.is_premium, u.premium_expiry_date, u.trial_activated_at
+      FROM users u
+      LEFT JOIN user_settings us ON u.id = us.user_id
+      WHERE u.id = ?
+    `,
+      [userId]
+    );
+
+    if (!user?.telegram_session) {
+      console.log(`⚠️ No Telegram session found for user: ${userId}`);
+      // Stop all services for this user if no session
+      await stopUserServices(userId);
+      return;
+    }
+
+    // NEW LOGIC: Check user account status before starting services
+    const now = new Date();
+    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
+
+    let isAccountExpired = false;
+    if (!user.is_admin) {
+      // Determine effective expiry date
+      let effectiveExpiryDate = null;
+      if (user.is_premium && user.premium_expiry_date) {
+        effectiveExpiryDate = new Date(user.premium_expiry_date);
+      } else if (!user.is_premium && user.trial_activated_at) {
+        const trialActivatedDate = new Date(user.trial_activated_at);
+        if (isNaN(trialActivatedDate.getTime())) { // Check for Invalid Date
+            console.warn(`Invalid trial_activated_at for user ${userId}: ${user.trial_activated_at}. Treating as expired.`);
+            isAccountExpired = true;
+        } else {
+            const calculatedTrialExpiry = new Date(trialActivatedDate);
+            calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
+            effectiveExpiryDate = calculatedTrialExpiry;
+        }
+      }
+
+      if (effectiveExpiryDate && now >= effectiveExpiryDate) {
+        isAccountExpired = true;
+        console.log(`❌ Account for user ${userId} has expired.`);
+        // If expired premium, downgrade them
+        if (user.is_premium) {
+            await db.run("UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [userId]);
+            console.log(`User ${userId} downgraded from premium due to expiry.`);
+        }
+      } else if (!user.is_premium && !user.trial_activated_at) {
+          // If not premium and no trial activated, they cannot have active services
+          isAccountExpired = true;
+          console.log(`❌ Normal user ${userId} has no active trial. Cannot start services.`);
+      }
+    }
+
+    if (isAccountExpired) {
+        console.log(`🛑 User ${userId} account expired. Stopping all their services.`);
+        // Ensure all their services are set to inactive in DB and stopped
+        await db.run("UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?", [userId]);
+        await stopUserServices(userId); // Explicitly stop running services
+        return; // Do not proceed to start services
+    }
+    // END NEW LOGIC
+
+    const services = await db.all(
+      "SELECT * FROM forwarding_services WHERE user_id = ? AND is_active = 1",
+      [userId]
+    );
+
+    if (services.length === 0) {
+      console.log(`⚠️ No active services found for user: ${userId}`);
+      // Ensure all services are stopped if there are no active ones in DB
+      await stopUserServices(userId);
+      return;
+    }
+
+    console.log(
+      `📋 Found ${services.length} active services for user ${userId}`
+    );
+
+    const client = await getOrCreateClient(userId, user.telegram_session);
+
+    // 🔥 IMPROVED: پاک کردن کامل سرویس‌های قبلی
+    await stopUserServices(userId); // This stops existing handlers and clears activeServices map
+
+    // 🔥 NEW: پاک کردن cache پیام‌های پردازش شده
+    cleanProcessedMessagesCache(userId);
+
+    // شروع همه سرویس‌ها
+    for (const service of services) {
+      // Check channel limits for existing active services (safeguard)
+      if (!user.is_admin) {
+        const maxChannelsPerService = user.is_premium
+          ? tariffSettings?.premium_user_max_channels_per_service ?? 10
+          : tariffSettings?.normal_user_max_channels_per_service ?? 1;
+
+        const sourceChannels = JSON.parse(service.source_channels || "[]");
+        const targetChannels = JSON.parse(service.target_channels || "[]");
+
+        if (sourceChannels.filter(Boolean).length > maxChannelsPerService ||
+            targetChannels.filter(Boolean).length > maxChannelsPerService) {
+          console.warn(
+            `Service ${service.id} for user ${userId} exceeds channel limit (${maxChannelsPerService}). Deactivating.`
+          );
+          await db.run(
+            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [service.id]
+          );
+          continue; // Skip starting this service
+        }
+      }
+      await startForwardingService(service, client, user.gemini_api_key);
+    }
+
+    // تنظیم event handler برای همه سرویس‌ها
+    await setupUserEventHandlers(userId);
+
+    // ارسال پیام‌های فعال‌سازی و شروع کپی تاریخچه
+    for (const service of services) {
+      // Re-check if service is still active in case it was deactivated above
+      const checkServiceActive = await db.get("SELECT is_active FROM forwarding_services WHERE id = ?", [service.id]);
+      if (!checkServiceActive || !checkServiceActive.is_active) {
+          console.log(`Service ${service.id} for user ${userId} was deactivated or skipped.`);
+          continue;
+      }
+
+      const activationTime = new Date().toLocaleString("fa-IR", {
+        timeZone: "Asia/Tehran",
+      });
+      await sendNotificationToUser(
+        client,
+        `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
+      );
+
+      // کپی تاریخچه در صورت نیاز
+      if (service.type === "copy" && service.copy_history) {
+        await startCopyHistory(service, client, userId);
+      }
+    }
+
+    console.log(`✅ All services started successfully for user ${userId}`);
+  } catch (err) {
+    console.error(`❌ Error starting user services for ${userId}:`, err);
+    throw err;
+  }
+}
+
+// 🔥 IMPROVED: کپی تاریخچه با جلوگیری از تکرار
 async function startCopyHistory(service, client, userId) {
   const taskId = `${userId}_${service.id}`;
   const serviceId = service.id;
 
-  // Check if a task is already processing
-  if (copyHistoryTasks.has(taskId)) {
-    const existingTask = copyHistoryTasks.get(taskId);
-    if (existingTask.processing) {
-      console.log(`📚 Service ${serviceId}: History copy task is already processing. Skipping.`);
-      return { success: false, error: "عملیات کپی در حال انجام است." };
-    }
-  }
-
-  // Prevent multiple runs within a short interval unless explicitly triggered
+  // بررسی اجرای قبلی
   const now = Date.now();
   const lastRun = lastCopyHistoryRunTimestamp.get(serviceId);
   if (lastRun && now - lastRun < MIN_INTERVAL_BETWEEN_COPY_HISTORY_RUNS) {
     console.log(
       `📚 Service ${serviceId}: History copy was run recently. Skipping to prevent duplication.`
     );
-    return { success: false, error: "کپی تاریخچه به تازگی انجام شده است." };
+    return;
   }
 
+  if (copyHistoryTasks.has(taskId)) {
+    const existingTask = copyHistoryTasks.get(taskId);
+    if (existingTask.processing) {
+      console.log(
+        `📚 Service ${serviceId}: History copy task is already processing. Skipping.`
+      );
+      return;
+    }
+  }
 
   console.log(`📚 Service ${serviceId}: Starting history copy processing.`);
 
   const task = {
-    active: true, // Flag to indicate if task should continue
-    processing: true, // Flag to indicate if task is currently running
+    active: true,
+    processing: true,
     cancel: () => {
       console.log(`🛑 Cancelling copy history task for service ${serviceId}`);
       task.active = false;
     },
   };
   copyHistoryTasks.set(taskId, task);
-
-  // Update service status to active in DB
-  const db = await openDb();
-  await db.run(
-    "UPDATE forwarding_services SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    [serviceId]
-  );
-  console.log(`Service ${serviceId} status set to active (copy in progress)`);
 
   let historyCopySuccessful = false;
 
@@ -296,7 +435,7 @@ async function startCopyHistory(service, client, userId) {
     if (!serviceData) {
       console.log(`⚠️ Service ${serviceId} not found in active services.`);
       task.active = false;
-      return { success: false, error: "سرویس فعال یافت نشد." };
+      return;
     }
 
     if (!messageMaps.has(serviceId)) {
@@ -324,17 +463,17 @@ async function startCopyHistory(service, client, userId) {
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
           offsetId: offsetId,
-          addOffset: 1, // Start from the next message
-          reverse: true, // Get newer messages in ascending order
+          addOffset: 1,
+          reverse: true,
         });
-        messages.reverse(); // Ensure chronological order for processing
-      } else { // copyDirection === "before"
+      } else {
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
           offsetId: offsetId,
-          addOffset: 0, // Include the offsetId message itself
-          reverse: false, // Get older messages in descending order
+          addOffset: 0,
+          reverse: false,
         });
+        if (messages.length > 0) messages.reverse();
       }
     } else {
       console.log(
@@ -344,28 +483,35 @@ async function startCopyHistory(service, client, userId) {
       if (historyDirection === "oldest") {
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
-          reverse: true, // Oldest first
+          reverse: true,
         });
-      } else { // newest
+      } else {
         messages = await client.getMessages(sourceChannelEntity, {
           limit: limit,
-          reverse: false, // Newest first
+          reverse: false,
         });
-        messages.reverse(); // Process from oldest to newest if 'newest' direction selected to send oldest first
+        if (messages.length > 0) messages.reverse();
       }
     }
 
-    // Filter messages already in messageMap (already forwarded)
+    // 🔥 IMPROVED: حذف پیام‌های تکراری
     const uniqueMessages = [];
-    const messageMap = messageMaps.get(serviceId); // Get the live map
-    for (const msg of messages) {
-      if (msg && msg.id && !messageMap.has(`${sourceChannelEntity.id.toString()}_${msg.id}`)) {
-        uniqueMessages.push(msg);
-      } else {
-        console.log(`⚠️ Message ${msg?.id} already in map for service ${serviceId}. Skipping.`);
+    const seenMessageIds = new Set();
+    const messageMap = messageMaps.get(serviceId);
+
+    for (const message of messages) {
+      if (message && message.id && !seenMessageIds.has(message.id)) {
+        // بررسی اینکه پیام قبلاً پردازش نشده باشد
+        if (!messageMap || !messageMap[message.id]) {
+          seenMessageIds.add(message.id);
+          uniqueMessages.push(message);
+        } else {
+          console.log(
+            `⚠️ Message ${message.id} already exists in message map. Skipping.`
+          );
+        }
       }
     }
-
 
     console.log(
       `📨 Service ${serviceId}: Found ${messages.length} messages, ${uniqueMessages.length} unique for history copy.`
@@ -422,7 +568,6 @@ async function startCopyHistory(service, client, userId) {
     );
 
     if (task.active) {
-      // Only send success notification and update lastRunTimestamp if not cancelled
       await sendNotificationToUser(
         client,
         `✅ کپی تاریخچه سرویس "${service.name}" تکمیل شد\n📊 کپی شده: ${copiedCount}, رد شده: ${skippedCount}`
@@ -439,7 +584,7 @@ async function startCopyHistory(service, client, userId) {
     }
   } finally {
     task.processing = false;
-    if (copyHistoryTasks.get(taskId) === task) { // Only delete if it's the same task instance
+    if (copyHistoryTasks.get(taskId) === task) {
       copyHistoryTasks.delete(taskId);
     }
     console.log(`🏁 Service ${serviceId}: History copy task finished.`);
@@ -448,216 +593,8 @@ async function startCopyHistory(service, client, userId) {
       lastCopyHistoryRunTimestamp.set(serviceId, Date.now());
       console.log(`⏱️ Service ${serviceId}: Updated last run timestamp.`);
     }
-
-    // Automatically deactivate service after history copy, unless it was manually stopped
-    // Ensure it's not a forward service
-    if (service.type === 'copy' && !task.active) {
-        // If task was cancelled (manually stopped), don't change service_activated_at
-        // Otherwise, if finished or failed, deactivate if it's a copy service
-        await db.run(
-          "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-          [serviceId]
-        );
-        console.log(`Service ${serviceId} automatically deactivated after history copy.`);
-        await sendNotificationToUser(client, `ℹ️ سرویس "${service.name}" به دلیل اتمام کپی تاریخچه، غیرفعال شد.`);
-        // Ensure the service is properly stopped from the active services map
-        await stopService(userId, serviceId); // This will clean up the activeServices map
-    }
-  }
-  return { success: true }; // Return success to API call, actual processing happens in background
-}
-
-// 🔥 NEW: Function to stop a specific copy history task (manually)
-async function stopCopyHistoryTask(userId, serviceId) {
-    const taskId = `${userId}_${serviceId}`;
-    const task = copyHistoryTasks.get(taskId);
-    if (task) {
-        task.cancel();
-        copyHistoryTasks.delete(taskId);
-        console.log(`🛑 Manually stopped copy history task for service ${serviceId}.`);
-        // We might also want to set is_active to 0 in DB here
-        const db = await openDb();
-        await db.run(
-            "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [serviceId]
-        );
-        // And then call stopService to clean up event handlers etc.
-        await stopService(userId, serviceId);
-        return { success: true, message: "عملیات کپی تاریخچه با موفقیت متوقف شد." };
-    }
-    return { success: false, message: "وظیفه کپی تاریخچه فعال یافت نشد." };
-}
-
-async function startUserServices(userId) {
-  try {
-    console.log(`🚀 Starting services for user ${userId}`);
-
-    const db = await openDb();
-
-    const user = await db.get(
-      `
-      SELECT u.telegram_session, us.gemini_api_key,
-             u.is_admin, u.is_premium, u.premium_expiry_date, u.trial_activated_at
-      FROM users u
-      LEFT JOIN user_settings us ON u.id = us.user_id
-      WHERE u.id = ?
-    `,
-      [userId]
-    );
-
-    if (!user?.telegram_session) {
-      console.log(`⚠️ No Telegram session found for user: ${userId}`);
-      // Stop all services for this user if no session
-      await stopUserServices(userId);
-      return;
-    }
-
-    // NEW LOGIC: Check user account status before starting services
-    const now = new Date();
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
-    const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
-
-    let isAccountExpired = false;
-    if (!user.is_admin) {
-      // Determine effective expiry date
-      let effectiveExpiryDate = null;
-      if (user.is_premium && user.premium_expiry_date) {
-        effectiveExpiryDate = new Date(user.premium_expiry_date);
-      } else if (!user.is_premium && user.trial_activated_at) {
-        const trialActivatedDate = new Date(user.trial_activated_at);
-        if (isNaN(trialActivatedDate.getTime())) { // Check for Invalid Date
-            console.warn(`Invalid trial_activated_at for user ${userId}: ${user.trial_activated_at}. Treating as expired.`);
-            isAccountExpired = true;
-        } else {
-            const calculatedTrialExpiry = new Date(trialActivatedDate);
-            calculatedTrialExpiry.setDate(trialActivatedDate.getDate() + normalUserTrialDays);
-            effectiveExpiryDate = calculatedTrialExpiry;
-        }
-      }
-
-      if (effectiveExpiryDate && now >= effectiveExpiryDate) {
-        isAccountExpired = true;
-        console.log(`❌ Account for user ${userId} has expired.`);
-        // If expired premium, downgrade them
-        if (user.is_premium) {
-            await db.run("UPDATE users SET is_premium = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND is_premium = 1", [userId]);
-            console.log(`User ${userId} downgraded from premium due to expiry.`);
-        }
-      } else if (!user.is_premium && !user.trial_activated_at) {
-          // If not premium and no trial activated, they cannot have active services
-          isAccountExpired = true;
-          console.log(`❌ Normal user ${userId} has no active trial. Cannot start services.`);
-      }
-    }
-
-    if (isAccountExpired) {
-        console.log(`🛑 User ${userId} account expired. Stopping all their services.`);
-        // Ensure all their services are set to inactive in DB and stopped
-        await db.run("UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?", [userId]);
-        await stopUserServices(userId); // Explicitly stop running services
-        return; // Do not proceed to start services
-    }
-    // END NEW LOGIC
-
-    const services = await db.all(
-      "SELECT * FROM forwarding_services WHERE user_id = ? AND is_active = 1",
-      [userId]
-    );
-
-    if (services.length === 0) {
-      console.log(`⚠️ No active services found for user: ${userId}`);
-      // Ensure all services are stopped if there are no active ones in DB
-      await stopUserServices(userId);
-      return;
-    }
-
-    console.log(
-      `📋 Found ${services.length} active services for user ${userId}`
-    );
-
-    const client = await getOrCreateClient(userId, user.telegram_session);
-
-    // 🔥 IMPROVED: پاک کردن کامل سرویس‌های قبلی (غیر از کپی تاریخچه که در حال اجرا هستند)
-    // First, identify copy history tasks that are currently running for this user
-    const runningCopyTasks = new Map();
-    for (const [taskId, task] of copyHistoryTasks.entries()) {
-        if (taskId.startsWith(`${userId}_`) && task.processing) {
-            const serviceId = taskId.split('_')[1];
-            runningCopyTasks.set(serviceId, task);
-        }
-    }
-
-    // Now, stop all services that are NOT running copy history tasks
-    const servicesToStop = Array.from(activeServices.get(userId)?.keys() || []).filter(serviceId => !runningCopyTasks.has(serviceId));
-    for (const serviceId of servicesToStop) {
-        await stopService(userId, serviceId); // This will clear from activeServices map as well
-    }
-
-    // Re-add/start only the non-copy services or copy services not doing history
-    for (const service of services) {
-        // If it's a copy service with history, and it's already running, skip re-starting it via this loop
-        if (service.type === 'copy' && service.copy_history && runningCopyTasks.has(service.id)) {
-            console.log(`📚 Service ${service.id} is a running copy history task. Skipping re-initialization.`);
-            continue;
-        }
-
-        // Check channel limits for existing active services (safeguard)
-        if (!user.is_admin) {
-          const maxChannelsPerService = user.is_premium
-            ? tariffSettings?.premium_user_max_channels_per_service ?? 10
-            : tariffSettings?.normal_user_max_channels_per_service ?? 1;
-
-          const sourceChannels = JSON.parse(service.source_channels || "[]");
-          const targetChannels = JSON.parse(service.target_channels || "[]");
-
-          if (sourceChannels.filter(Boolean).length > maxChannelsPerService ||
-              targetChannels.filter(Boolean).length > maxChannelsPerService) {
-            console.warn(
-              `Service ${service.id} for user ${userId} exceeds channel limit (${maxChannelsPerService}). Deactivating.`
-            );
-            await db.run(
-              "UPDATE forwarding_services SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-              [service.id]
-            );
-            continue; // Skip starting this service
-          }
-        }
-        await startForwardingService(service, client, user.gemini_api_key);
-    }
-
-    // تنظیم event handler برای همه سرویس‌ها
-    await setupUserEventHandlers(userId);
-
-    // ارسال پیام‌های فعال‌سازی و شروع کپی تاریخچه
-    for (const service of services) {
-      // Re-check if service is still active in case it was deactivated above
-      const checkServiceActive = await db.get("SELECT is_active FROM forwarding_services WHERE id = ?", [service.id]);
-      if (!checkServiceActive || !checkServiceActive.is_active) {
-          console.log(`Service ${service.id} for user ${userId} was deactivated or skipped.`);
-          continue;
-      }
-
-      // If it's a copy service with history, and not already running, initiate history copy
-      if (service.type === "copy" && service.copy_history && !runningCopyTasks.has(service.id)) {
-        await startCopyHistory(service, client, userId);
-      } else {
-         const activationTime = new Date().toLocaleString("fa-IR", {
-            timeZone: "Asia/Tehran",
-          });
-          await sendNotificationToUser(
-            client,
-            `🟢 سرویس "${service.name}" فعال شد\n⏰ ${activationTime}`
-          );
-      }
-    }
-
-    console.log(`✅ All services started successfully for user ${userId}`);
-  } catch (err) {
-    console.error(`❌ Error starting user services for ${userId}:`, err);
-    throw err;
   }
 }
-
 
 // 🔥 IMPROVED: تنظیم Event Handler با جلوگیری از تکرار
 async function setupUserEventHandlers(userId) {
@@ -665,8 +602,6 @@ async function setupUserEventHandlers(userId) {
     const userServices = activeServices.get(userId);
     if (!userServices || userServices.size === 0) {
       console.log(`⚠️ No services found for user ${userId}`);
-      // Ensure event handlers are cleaned up if no services are active
-      await cleanupUserEventHandlers(userId);
       return;
     }
 
@@ -675,26 +610,22 @@ async function setupUserEventHandlers(userId) {
     // 🔥 IMPROVED: حذف کامل event handler های قبلی
     await cleanupUserEventHandlers(userId);
 
-    // جمع‌آوری همه source channel ها برای سرویس‌های "forward" (غیر کپی تاریخچه)
+    // جمع‌آوری همه source channel ها
     const allSourceChannelIds = new Set();
     for (const [serviceId, serviceData] of userServices.entries()) {
-      // Only attach event handlers for 'forward' services or 'copy' services *not* doing history copy
-      // For now, we assume copy services with copy_history enabled don't need real-time event listeners
-      if (serviceData.service.type === 'forward' || (serviceData.service.type === 'copy' && !serviceData.service.copy_history)) {
-        const sourceChannels = JSON.parse(serviceData.service.source_channels);
-        for (const sourceChannel of sourceChannels) {
-          try {
-            const formattedUsername = sourceChannel.startsWith("@")
-              ? sourceChannel
-              : `@${sourceChannel}`;
-            const entity = await client.getEntity(formattedUsername);
-            allSourceChannelIds.add(entity.id);
-            console.log(
-              `📡 Added source channel ${formattedUsername} (${entity.id}) for service ${serviceId}`
-            );
-          } catch (err) {
-            console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
-          }
+      const sourceChannels = JSON.parse(serviceData.service.source_channels);
+      for (const sourceChannel of sourceChannels) {
+        try {
+          const formattedUsername = sourceChannel.startsWith("@")
+            ? sourceChannel
+            : `@${sourceChannel}`;
+          const entity = await client.getEntity(formattedUsername);
+          allSourceChannelIds.add(entity.id);
+          console.log(
+            `📡 Added source channel ${formattedUsername} (${entity.id}) for service ${serviceId}`
+          );
+        } catch (err) {
+          console.error(`❌ Error getting entity for ${sourceChannel}:`, err);
         }
       }
     }
@@ -720,7 +651,7 @@ async function setupUserEventHandlers(userId) {
         `🔄 Event handlers setup for user ${userId} with ${allSourceChannelIds.size} channels`
       );
     } else {
-      console.log(`⚠️ No valid source channels found for user ${userId} for real-time processing`);
+      console.log(`⚠️ No valid source channels found for user ${userId}`);
     }
   } catch (err) {
     console.error(
@@ -734,13 +665,12 @@ async function stopService(userId, serviceId) {
   try {
     console.log(`🛑 Stopping service ${serviceId} for user ${userId}`);
 
-    // Cancel copy history task if it exists for this service
+    // Cancel copy history task
     const taskId = `${userId}_${serviceId}`;
     const copyTask = copyHistoryTasks.get(taskId);
     if (copyTask) {
       copyTask.cancel();
       copyHistoryTasks.delete(taskId);
-      console.log(`🛑 Cancelled associated copy history task for service ${serviceId}.`);
     }
 
     const userServices = activeServices.get(userId);
@@ -762,7 +692,7 @@ async function stopService(userId, serviceId) {
       deleteMessageMapFile(serviceId);
 
       userServices.delete(serviceId);
-      lastCopyHistoryRunTimestamp.delete(serviceId); // Remove last run timestamp too
+      lastCopyHistoryRunTimestamp.delete(serviceId);
 
       if (userServices.size === 0) {
         activeServices.delete(userId);
@@ -770,7 +700,6 @@ async function stopService(userId, serviceId) {
         // 🔥 NEW: پاک کردن cache پیام‌های پردازش شده
         cleanProcessedMessagesCache(userId);
       } else {
-        // If other services are still active for this user, re-setup event handlers
         await setupUserEventHandlers(userId);
       }
 
@@ -789,7 +718,7 @@ async function cleanupUserEventHandlers(userId) {
   try {
     const eventHandlers = userEventHandlers.get(userId) || [];
     if (eventHandlers.length > 0) {
-      const client = await getOrCreateClient(userId); // Ensure client is available to remove handlers
+      const client = await getOrCreateClient(userId);
       for (const handler of eventHandlers) {
         try {
           client.removeEventHandler(handler);
@@ -813,7 +742,7 @@ async function cleanupUserEventHandlers(userId) {
 
 async function stopUserServices(userId) {
   try {
-    // Cancel all copy history tasks for this user
+    // Cancel copy history tasks
     const tasksToCancel = [];
     for (const [taskId, task] of copyHistoryTasks.entries()) {
       if (taskId.startsWith(`${userId}_`)) {
@@ -829,7 +758,7 @@ async function stopUserServices(userId) {
     const userServicesMap = activeServices.get(userId);
     if (userServicesMap) {
       for (const serviceId of userServicesMap.keys()) {
-        lastCopyHistoryRunTimestamp.delete(serviceId); // Clear all last run timestamps
+        lastCopyHistoryRunTimestamp.delete(serviceId);
       }
     }
 
@@ -846,7 +775,6 @@ async function stopUserServices(userId) {
           saveMessageMap(serviceId, messageMap);
           messageMaps.delete(serviceId);
         }
-        deleteMessageMapFile(serviceId); // Ensure file is deleted on full stop
       }
 
       activeServices.delete(userId);
@@ -894,12 +822,10 @@ async function initializeAllServices() {
 module.exports = {
   activeServices,
   userEventHandlers,
-  copyHistoryTasks, // Export for access in stopCopyHistoryTask
+  copyHistoryTasks,
   startForwardingService,
   startUserServices,
-  startCopyHistory, // Export the new function
   stopService,
-  stopCopyHistoryTask, // Export the new function
   stopUserServices,
   initializeAllServices,
 };

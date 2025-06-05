@@ -205,11 +205,6 @@ export default function ForwardingServiceForm({
   const serviceType = form.watch("type");
   const isCopyService = serviceType === "copy";
 
-  // NEW: Check if this is an existing copy service that has already started copying history
-  const isExistingCopyServiceWithHistoryStarted = service?.id && service?.type === 'copy' && service?.service_activated_at;
-  const disableCopyHistoryFields = isExistingCopyServiceWithHistoryStarted && !isAdmin;
-
-
   const {
     fields: sourceFields,
     append: appendSource,
@@ -501,7 +496,6 @@ export default function ForwardingServiceForm({
                     onValueChange={field.onChange}
                     defaultValue={field.value}
                     dir="rtl"
-                    disabled={disableCopyHistoryFields} // Disable if history copy has started
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -576,7 +570,6 @@ export default function ForwardingServiceForm({
                                 dir="ltr"
                                 placeholder="@SourceChannel"
                                 {...controlledField}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               />
                             </FormControl>
                           </div>
@@ -598,7 +591,6 @@ export default function ForwardingServiceForm({
                                 dir="ltr"
                                 placeholder="@SourceChannel"
                                 {...controlledField}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               />
                             </FormControl>
                             {sourceFields.length > 1 && (
@@ -607,7 +599,6 @@ export default function ForwardingServiceForm({
                                 variant="outline"
                                 size="icon"
                                 onClick={() => removeSource(index)}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -625,7 +616,6 @@ export default function ForwardingServiceForm({
                   size="sm"
                   onClick={() => appendSource("")}
                   className="w-full gap-x-1"
-                  disabled={disableCopyHistoryFields} // Disable if history copy has started
                 >
                   <Plus className="h-4 w-4" />
                   افزودن مبدأ
@@ -655,7 +645,6 @@ export default function ForwardingServiceForm({
                                 dir="ltr"
                                 placeholder="@TargetChannel"
                                 {...controlledField}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               />
                             </FormControl>
                           </div>
@@ -677,7 +666,6 @@ export default function ForwardingServiceForm({
                                 dir="ltr"
                                 placeholder="@TargetChannel"
                                 {...controlledField}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               />
                             </FormControl>
                             {targetFields.length > 1 && (
@@ -686,7 +674,6 @@ export default function ForwardingServiceForm({
                                 variant="outline"
                                 size="icon"
                                 onClick={() => removeTarget(index)}
-                                disabled={disableCopyHistoryFields} // Disable if history copy has started
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -704,7 +691,6 @@ export default function ForwardingServiceForm({
                   size="sm"
                   onClick={() => appendTarget("")}
                   className="w-full gap-x-1"
-                  disabled={disableCopyHistoryFields} // Disable if history copy has started
                 >
                   <Plus className="h-4 w-4" />
                   افزودن مقصد
@@ -724,14 +710,6 @@ export default function ForwardingServiceForm({
               <CardDesc>
                 تنظیمات مربوط به نحوه کپی پیام‌های قدیمی کانال.
               </CardDesc>
-               {disableCopyHistoryFields && (
-                <Alert variant="info">
-                    <Info className="h-4 w-4" />
-                    <AlertDescription>
-                        تاریخچه این سرویس قبلاً کپی شده است. برای جلوگیری از کپی مجدد یا تکرار، تنظیمات کپی تاریخچه قابل ویرایش نیستند.
-                    </AlertDescription>
-                </Alert>
-            )}
             </CardHeader>
             <CardContent className="space-y-6">
               <FormField
@@ -753,7 +731,6 @@ export default function ForwardingServiceForm({
                         id="copyHistory-switch"
                         checked={field.value}
                         onCheckedChange={field.onChange}
-                        disabled={disableCopyHistoryFields} // Disable if history copy has started
                       />
                     </FormControl>
                   </FormItem>
@@ -775,7 +752,6 @@ export default function ForwardingServiceForm({
                             max="10000"
                             placeholder="100"
                             {...field}
-                            disabled={disableCopyHistoryFields} // Disable if history copy has started
                           />
                         </FormControl>
                         <FormDescription>حداکثر ۱۰۰۰۰ پیام.</FormDescription>
@@ -797,7 +773,7 @@ export default function ForwardingServiceForm({
                         >
                           <FormItem className="flex items-center gap-x-2">
                             <FormControl>
-                              <RadioGroupItem value="newest" disabled={disableCopyHistoryFields} />
+                              <RadioGroupItem value="newest" />
                             </FormControl>
                             <FormLabel className="font-normal">
                               جدیدترین
@@ -805,7 +781,7 @@ export default function ForwardingServiceForm({
                           </FormItem>
                           <FormItem className="flex items-center gap-x-2">
                             <FormControl>
-                              <RadioGroupItem value="oldest" disabled={disableCopyHistoryFields} />
+                              <RadioGroupItem value="oldest" />
                             </FormControl>
                             <FormLabel className="font-normal">
                               قدیمی‌ترین
@@ -833,7 +809,6 @@ export default function ForwardingServiceForm({
                               type="text"
                               placeholder="شناسه عددی پیام"
                               {...field}
-                              disabled={disableCopyHistoryFields} // Disable if history copy has started
                             />
                           </FormControl>
                           <FormMessage />
@@ -855,7 +830,7 @@ export default function ForwardingServiceForm({
                             >
                               <FormItem className="flex items-center gap-x-2">
                                 <FormControl>
-                                  <RadioGroupItem value="before" disabled={disableCopyHistoryFields} />
+                                  <RadioGroupItem value="before" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
                                   پیام‌های قبل (قدیمی‌تر)
@@ -863,7 +838,7 @@ export default function ForwardingServiceForm({
                               </FormItem>
                               <FormItem className="flex items-center gap-x-2">
                                 <FormControl>
-                                  <RadioGroupItem value="after" disabled={disableCopyHistoryFields} />
+                                  <RadioGroupItem value="after" />
                                 </FormControl>
                                 <FormLabel className="font-normal">
                                   پیام‌های بعد (جدیدتر)
