@@ -5,8 +5,7 @@ import { verifyToken } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 // Use an environment variable for the Express server base URL
-const EXPRESS_SERVER_BASE_URL =
-  process.env.EXPRESS_SERVER_INTERNAL_URL || "http://localhost:3332";
+const EXPRESS_SERVER_BASE_URL = process.env.EXPRESS_SERVER_INTERNAL_URL || "http://localhost:3332";
 
 export async function GET(request) {
   try {
@@ -20,16 +19,13 @@ export async function GET(request) {
       );
     }
 
-    const expressResponse = await fetch(
-      `${EXPRESS_SERVER_BASE_URL}/tariff-settings`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
+    const expressResponse = await fetch(`${EXPRESS_SERVER_BASE_URL}/tariff-settings`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+    });
 
     if (!expressResponse.ok) {
       const errorData = await expressResponse.json();
@@ -61,17 +57,14 @@ export async function PUT(request) {
 
     const requestBody = await request.json();
 
-    const expressResponse = await fetch(
-      `${EXPRESS_SERVER_BASE_URL}/tariff-settings`,
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestBody),
-      }
-    );
+    const expressResponse = await fetch(`${EXPRESS_SERVER_BASE_URL}/tariff-settings`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
 
     if (!expressResponse.ok) {
       const errorData = await expressResponse.json();

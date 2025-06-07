@@ -9,7 +9,7 @@ module.exports = {
         NODE_ENV: "production",
         PORT: 1332,
         NEXT_PUBLIC_API_URL: "https://sna.freebotmoon.ir:3332",
-        ZARINPAL_MERCHANT_ID: "a40dc628-3a06-11e6-b731-000c295eb8fc",
+        BOT_TOKEN: "7592946651:AAF9k8_vdXc2BKMqZZEgK9djE8ef-mjl0PI",
       },
       exec_mode: "fork",
     },
