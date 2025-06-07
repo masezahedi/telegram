@@ -4,7 +4,8 @@ import jwt from "jsonwebtoken";
 import { openDb } from "@/lib/db";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN =
+  process.env.BOT_TOKEN || "7592946651:AAF9k8_vdXc2BKMqZZEgK9djE8ef-mjl0PI";
 
 async function verifyTelegramAuth(initData) {
   if (!BOT_TOKEN) {
