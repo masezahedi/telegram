@@ -10,7 +10,6 @@ import "@fontsource/vazirmatn/800.css";
 import "@fontsource/vazirmatn/900.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
-import Script from "next/script";
 
 export const metadata = {
   title: "سرویس های تلگرام | صفحه اصلی",
@@ -20,12 +19,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="fa" dir="rtl">
-      <head>
-        <Script
-          src="https://telegram.org/js/telegram-web-app.js"
-          strategy="beforeInteractive"
-        />
-      </head>
+      <head></head>
       <body className="font-vazirmatn bg-background">
         <ThemeProvider attribute="class" defaultTheme="light">
           {children}
