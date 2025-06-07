@@ -13,7 +13,7 @@ const navItems = [
   { label: "خانه", href: "/" },
   { label: "معرفی سرویس‌ها", href: "/services-info" }, // لینک‌ها را در صورت نیاز تغییر دهید
   { label: "ارتباط با ما", href: "#" },
-  { label: "قوانین", href: "#" },
+  { label: "قوانین", href: "/rules" },
 ];
 
 export default function Home() {

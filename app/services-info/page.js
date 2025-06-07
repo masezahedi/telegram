@@ -17,7 +17,7 @@ const navItems = [
   { label: "خانه", href: "/" },
   { label: "معرفی سرویس‌ها", href: "/services-info" },
   { label: "ارتباط با ما", href: "#" },
-  { label: "قوانین", href: "#" },
+  { label: "قوانین", href: "/rules" },
 ];
 
 const services = [
