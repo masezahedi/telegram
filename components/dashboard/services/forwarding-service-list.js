@@ -1,4 +1,4 @@
-// components/dashboard/services/forwarding-service-list.js
+// components/dashboard/services/forwarding-service-list.js (نسخه کامل و اصلاح شده)
 "use client";
 
 import { useState, useEffect } from "react";
@@ -33,46 +33,18 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [editingService, setEditingService] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
-  // Extract tariff settings and user status
-  const normalUserTrialDays = userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
-  const normalUserMaxActiveServices = userAccountStatus?.tariffSettings?.normalUserMaxActiveServices ?? 1;
-  const premiumUserMaxActiveServices = userAccountStatus?.tariffSettings?.premiumUserMaxActiveServices ?? 5;
-
+  // Extract props passed from parent component. These are now the single source of truth.
+  const isAccountExpired = userAccountStatus?.isExpired;
   const isTelegramConnected = userAccountStatus?.isTelegramConnected;
   const isAdmin = userAccountStatus?.isAdmin;
   const isPremium = userAccountStatus?.isPremium;
-  const trialActivatedAt = userAccountStatus?.trialActivatedAt; // This is the actual timestamp
-  const premiumExpiryDate = userAccountStatus?.premiumExpiryDate; // This is the actual timestamp
-
-  // Determine if the user's account is currently expired
-  const now = new Date();
-  let isAccountExpired = false;
-
-  // Check if trialActivatedAt exists (meaning trial was activated)
-  const isTrialActuallyActivated = Boolean(trialActivatedAt);
-
-  if (!isAdmin) {
-    if (isPremium) {
-      // Premium users: check premiumExpiryDate
-      if (premiumExpiryDate && new Date(premiumExpiryDate) < now) {
-        isAccountExpired = true;
-      }
-    } else {
-      // Normal users: check trial_activated_at and calculate expiry based on normalUserTrialDays
-      if (isTrialActuallyActivated) {
-        const trialStartDate = new Date(trialActivatedAt);
-        const trialEndDate = new Date(trialStartDate);
-        trialEndDate.setDate(trialStartDate.getDate() + normalUserTrialDays);
-        if (trialEndDate < now) {
-          isAccountExpired = true;
-        }
-      } else {
-        // If not premium and trial never activated, consider as expired for service creation/activation purposes
-        isAccountExpired = true; // This handles the case where trial hasn't started yet
-      }
-    }
-  }
-
+  const isTrialActivated = userAccountStatus?.trialActivated;
+  const normalUserTrialDays =
+    userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
+  const normalUserMaxActiveServices =
+    userAccountStatus?.tariffSettings?.normalUserMaxActiveServices ?? 1;
+  const premiumUserMaxActiveServices =
+    userAccountStatus?.tariffSettings?.premiumUserMaxActiveServices ?? 5;
 
   const loadServices = async () => {
     setLoading(true);
@@ -92,22 +64,21 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   }, []);
 
   const handleStatusChange = async (id, newIsActiveStatus) => {
-    // Check if activating or deactivating
-    if (newIsActiveStatus) { // User is trying to ACTIVATE a service
+    if (newIsActiveStatus) {
       if (!isTelegramConnected) {
         toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
-        await loadServices(); // Reload to revert UI if toast prevents action
+        await loadServices();
         return;
       }
-      if (!isAdmin) { // Admins bypass these checks
-        if (isAccountExpired) { // Use the newly calculated isAccountExpired
+      if (!isAdmin) {
+        if (isAccountExpired) {
           toast.error(
-            "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد. لطفاً اشتراک خود را ارتقا دهید."
+            "مهلت استفاده شما از سرویس‌ها به پایان رسیده است. امکان فعال‌سازی سرویس وجود ندارد."
           );
           await loadServices();
           return;
         }
-        if (!isPremium && !isTrialActuallyActivated) { // If normal user AND trial NOT activated yet
+        if (!isPremium && !isTrialActivated) {
           toast.error(
             `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
           );
@@ -117,16 +88,15 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       }
     }
 
-    // Check active service limit if activating
     if (newIsActiveStatus && !isAdmin) {
-      const currentActiveServices = services.filter(s => s.is_active).length;
+      const currentActiveServices = services.filter((s) => s.is_active).length;
       const maxActiveServices = isPremium
         ? premiumUserMaxActiveServices
         : normalUserMaxActiveServices;
 
       if (currentActiveServices >= maxActiveServices) {
         toast.error(
-          `شما به حداکثر تعداد سرویس‌های فعال (${maxActiveServices}) رسیده‌اید. برای فعال‌سازی این سرویس، لطفاً ابتدا یک سرویس دیگر را غیرفعال کنید.`
+          `شما به حداکثر تعداد سرویس‌های فعال (${maxActiveServices}) رسیده‌اید.`
         );
         await loadServices();
         return;
@@ -145,7 +115,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
             ? "سرویس با موفقیت فعال شد"
             : "سرویس با موفقیت غیرفعال شد"
         );
-        onUpdate?.(); // Trigger parent update to refresh user status/expiry message
+        onUpdate?.();
       } else {
         toast.error(result.error || "خطا در تغییر وضعیت سرویس");
         await loadServices();
@@ -169,7 +139,7 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       if (result.success) {
         setServices(services.filter((service) => service.id !== id));
         toast.success("سرویس با موفقیت حذف شد");
-        onUpdate?.(); // Trigger parent update
+        onUpdate?.();
       } else {
         toast.error(result.error || "خطا در حذف سرویس");
       }
@@ -180,17 +150,16 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   };
 
   const handleEdit = (service) => {
-    // Block editing if account is expired and not premium/admin or telegram not connected
     if (!isAdmin) {
-      if (isAccountExpired) { // Use the newly calculated isAccountExpired
+      if (isAccountExpired) {
         toast.error(
-          "مهلت استفاده شما به پایان رسیده و امکان ویرایش سرویس وجود ندارد. لطفاً اشتراک خود را ارتقا دهید."
+          "مهلت استفاده شما به پایان رسیده و امکان ویرایش سرویس وجود ندارد."
         );
         return;
       }
-      if (!isPremium && !isTrialActuallyActivated) { // If normal user AND trial NOT activated yet
+      if (!isPremium && !isTrialActivated) {
         toast.error(
-          `لطفاً برای شروع استفاده از سرویس، روی دکمه "فعال‌سازی مهلت ${normalUserTrialDays} روزه" کلیک کنید.`
+          `لطفاً برای شروع استفاده از سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید.`
         );
         return;
       }
@@ -211,14 +180,13 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     onUpdate?.();
   };
 
-  // NEW LOGIC: Handle trial activation
   const handleActivateTrial = async () => {
     setLoading(true);
     try {
       const result = await UserService.activateTrial();
       if (result.success) {
         toast.success(result.message);
-        onUpdate?.(); // Trigger user state update in parent
+        onUpdate?.();
       } else {
         toast.error(result.error || "خطا در فعال‌سازی مهلت آزمایشی.");
       }
@@ -229,7 +197,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       setLoading(false);
     }
   };
-
 
   if (loading) {
     return (
@@ -259,51 +226,38 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
         <ForwardingServiceForm
           service={editingService}
           onSuccess={handleFormSuccess}
-          userAccountStatus={{ // Ensure correct props are passed
-            ...userAccountStatus,
-            isExpired: isAccountExpired, // Pass the correct calculated expiry status
-            trialActivated: isTrialActuallyActivated, // Pass the correct calculated trial activation status
-          }}
+          userAccountStatus={userAccountStatus}
         />
       </div>
     );
   }
 
-  // Determine if "Create New Service" button should be disabled
+  // Logic for disabling create button and switches
   const disableCreateNew =
-    !isAdmin && // Not an admin
-    (
-      isAccountExpired || // Account is expired (either truly expired or trial never activated)
-      !isTelegramConnected // Not telegram connected
-    );
-
-  // Determine if trial activation button should be shown
-  const showTrialActivationButton =
     !isAdmin &&
-    !isPremium &&
-    !isTrialActuallyActivated && // Only show if normal user and trial hasn't started
-    isTelegramConnected && // Only show if telegram is connected
-    !isAccountExpired; // Only show if account is not already expired (based on premium_expiry_date)
+    (isAccountExpired ||
+      !isTelegramConnected ||
+      (!isPremium && !isTrialActivated));
+  const showTrialActivationButton =
+    !isAdmin && !isPremium && !isTrialActivated && isTelegramConnected;
 
-  // Determine if switch should be disabled for limit reasons or general account status
-  const disableSwitchDueToLimits = (serviceStatus) => {
-    if (isAdmin) return false; // Admins always enabled
+  const getSwitchDisabledTooltip = (service) => {
+    if (!isTelegramConnected)
+      return "برای فعال‌سازی، ابتدا تلگرام را متصل کنید.";
+    if (isAccountExpired) return "حساب کاربری شما منقضی شده است.";
+    if (!isPremium && !isTrialActivated)
+      return `برای فعال‌سازی، ابتدا مهلت ${normalUserTrialDays} روزه خود را فعال کنید.`;
 
-    if (!isTelegramConnected) return true; // Disable if Telegram is not connected
-    if (isAccountExpired) return true; // Disable if account is expired
-    if (!isPremium && !isTrialActuallyActivated) return true; // Disable if normal user and trial not activated
-
-    if (!serviceStatus.is_active) { // If trying to activate an inactive service
-      const currentActiveServices = services.filter(s => s.is_active).length;
+    if (!service.is_active) {
+      const currentActiveServices = services.filter((s) => s.is_active).length;
       const maxActiveServices = isPremium
         ? premiumUserMaxActiveServices
         : normalUserMaxActiveServices;
-
       if (currentActiveServices >= maxActiveServices) {
-        return true; // Disable if max active services reached
+        return `به سقف ${maxActiveServices} سرویس فعال رسیده‌اید.`;
       }
     }
-    return false;
+    return null; // No tooltip needed if not disabled
   };
 
   return (
@@ -317,7 +271,9 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
               disabled={loading}
             >
               <Info className="h-4 w-4" />
-              {loading ? "در حال فعال‌سازی..." : `فعال‌سازی مهلت ${normalUserTrialDays} روزه`}
+              {loading
+                ? "در حال فعال‌سازی..."
+                : `فعال‌سازی مهلت ${normalUserTrialDays} روزه`}
             </Button>
           )}
           <Button
@@ -335,10 +291,11 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
             <Info className="h-4 w-4" />
             <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
             <AlertDescription>
-              امکان ایجاد سرویس جدید وجود ندارد. لطفاً{" "}
-              {!isTelegramConnected ? "ابتدا تلگرام خود را متصل کنید،" : ""}
-              {(!isPremium && !isTrialActuallyActivated) ? " مهلت آزمایشی خود را فعال کنید" : ""}
-              {(isAccountExpired) ? " یا اشتراک خود را ارتقا دهید." : ""}
+              {!isTelegramConnected
+                ? "لطفاً ابتدا تلگرام خود را متصل کنید."
+                : !isPremium && !isTrialActivated
+                ? `لطفاً مهلت آزمایشی خود را فعال کنید.`
+                : "مهلت استفاده شما به پایان رسیده است. برای ایجاد سرویس جدید، اشتراک خود را ارتقا دهید."}
             </AlertDescription>
           </Alert>
         )}
@@ -372,113 +329,95 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {services.map((service) => (
-                  <TableRow key={service.id} className="hover:bg-muted/50">
-                    <TableCell className="text-right font-medium py-3 ps-4">
-                      {service.name}
-                    </TableCell>
-                    <TableCell className="text-right py-3">
-                      <Badge
-                        variant={
-                          service.type === "copy" ? "secondary" : "default"
-                        }
-                        className="whitespace-nowrap"
-                      >
-                        {service.type === "copy"
-                          ? "کپی کانال"
-                          : "فوروارد خودکار"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right py-3 max-w-xs truncate">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-default">
-                            {(Array.isArray(service.source_channels)
-                              ? service.source_channels
-                              : []
-                            ).join("، ")}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-right">
-                          {" "}
-                          {(Array.isArray(service.source_channels)
-                            ? service.source_channels
-                            : []
-                          ).map((ch) => (
-                            <div key={ch}>{ch}</div>
-                          ))}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className="text-right py-3 max-w-xs truncate">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-default">
-                            {(Array.isArray(service.target_channels)
-                              ? service.target_channels
-                              : []
-                            ).join("، ")}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-right">
-                          {(Array.isArray(service.target_channels)
-                            ? service.target_channels
-                            : []
-                          ).map((ch) => (
-                            <div key={ch}>{ch}</div>
-                          ))}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className="text-right py-3">
-                      <Switch
-                        checked={Boolean(service.is_active)}
-                        onCheckedChange={(checked) =>
-                          handleStatusChange(service.id, checked)
-                        }
-                        disabled={disableSwitchDueToLimits(service)}
-                        aria-label={`فعال/غیرفعال سازی سرویس ${service.name}`}
-                        dir="ltr"
-                      />
-                    </TableCell>
-                    <TableCell className="text-center py-3 pe-4">
-                      <div className="flex justify-center gap-x-1">
+                {services.map((service) => {
+                  const switchDisabled =
+                    !isAdmin &&
+                    (isAccountExpired ||
+                      !isTelegramConnected ||
+                      (!isPremium && !isTrialActivated));
+                  const switchTooltip = getSwitchDisabledTooltip(service);
+                  return (
+                    <TableRow key={service.id} className="hover:bg-muted/50">
+                      <TableCell className="text-right font-medium py-3 ps-4">
+                        {service.name}
+                      </TableCell>
+                      <TableCell className="text-right py-3">
+                        <Badge
+                          variant={
+                            service.type === "copy" ? "secondary" : "default"
+                          }
+                          className="whitespace-nowrap"
+                        >
+                          {service.type === "copy"
+                            ? "کپی کانال"
+                            : "فوروارد خودکار"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right py-3 max-w-xs truncate">
+                        {(service.source_channels || []).join("، ")}
+                      </TableCell>
+                      <TableCell className="text-right py-3 max-w-xs truncate">
+                        {(service.target_channels || []).join("، ")}
+                      </TableCell>
+                      <TableCell className="text-right py-3">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(service)}
-                              disabled={!isAdmin && (isAccountExpired || !isTrialActuallyActivated || !isTelegramConnected)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                              <span className="sr-only">ویرایش</span>
-                            </Button>
+                            <div>
+                              {" "}
+                              {/* Wrapper div for TooltipTrigger */}
+                              <Switch
+                                checked={Boolean(service.is_active)}
+                                onCheckedChange={(checked) =>
+                                  handleStatusChange(service.id, checked)
+                                }
+                                disabled={switchDisabled}
+                                dir="ltr"
+                              />
+                            </div>
                           </TooltipTrigger>
-                          <TooltipContent>
-                            <p>ویرایش سرویس</p>
-                          </TooltipContent>
+                          {switchTooltip && (
+                            <TooltipContent>
+                              <p>{switchTooltip}</p>
+                            </TooltipContent>
+                          )}
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive/90"
-                              onClick={() => handleDelete(service.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              <span className="sr-only">حذف</span>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>حذف سرویس</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell className="text-center py-3 pe-4">
+                        <div className="flex justify-center gap-x-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(service)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>ویرایش سرویس</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:text-destructive/90"
+                                onClick={() => handleDelete(service.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>حذف سرویس</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
