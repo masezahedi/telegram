@@ -1,4 +1,4 @@
-// app/api/services/route.js
+// app/api/services/route.js (نسخه کامل و اصلاح شده)
 import { NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { openDb } from "@/lib/db";
@@ -112,15 +112,19 @@ export async function POST(request) {
     const now = new Date();
 
     // Fetch tariff settings
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
-    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
-    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10;
+    const tariffSettings = await db.get(
+      "SELECT * FROM tariff_settings LIMIT 1"
+    );
+    const normalUserMaxChannelsPerService =
+      tariffSettings?.normal_user_max_channels_per_service ?? 1;
+    const premiumUserMaxChannelsPerService =
+      tariffSettings?.premium_user_max_channels_per_service ?? 10;
     const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
 
     // Determine effective expiry date for the user based on premium_expiry_date (which includes trial end)
     let effectiveAccountExpiryDate = null;
     if (user.premium_expiry_date) {
-        effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
     }
 
     // --- Start of Limit Checks for Creating Service ---
@@ -151,9 +155,14 @@ export async function POST(request) {
       }
 
       // Tier-based limits on channel count
-      if (!user.is_premium) { // Only for normal user
-        if (sourceChannels.filter(Boolean).length > normalUserMaxChannelsPerService ||
-            targetChannels.filter(Boolean).length > normalUserMaxChannelsPerService) {
+      if (!user.is_premium) {
+        // Only for normal user
+        if (
+          sourceChannels.filter(Boolean).length >
+            normalUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length >
+            normalUserMaxChannelsPerService
+        ) {
           return NextResponse.json(
             {
               success: false,
@@ -162,9 +171,14 @@ export async function POST(request) {
             { status: 403 }
           );
         }
-      } else { // Premium user channel limit
-        if (sourceChannels.filter(Boolean).length > premiumUserMaxChannelsPerService ||
-            targetChannels.filter(Boolean).length > premiumUserMaxChannelsPerService) {
+      } else {
+        // Premium user channel limit
+        if (
+          sourceChannels.filter(Boolean).length >
+            premiumUserMaxChannelsPerService ||
+          targetChannels.filter(Boolean).length >
+            premiumUserMaxChannelsPerService
+        ) {
           return NextResponse.json(
             {
               success: false,
@@ -204,6 +218,13 @@ export async function POST(request) {
         copyDirection,
       ]
     );
+
+    // START: کد جدید برای افزایش شمارنده
+    await db.run(
+      "UPDATE users SET service_creation_count = service_creation_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [decoded.userId]
+    );
+    // END: کد جدید
 
     return NextResponse.json({ success: true, serviceId: serviceId });
   } catch (error) {
@@ -266,24 +287,29 @@ export async function PUT(request) {
     let userIsEffectivelyPremium = false;
 
     // Fetch tariff settings
-    const tariffSettings = await db.get("SELECT * FROM tariff_settings LIMIT 1");
+    const tariffSettings = await db.get(
+      "SELECT * FROM tariff_settings LIMIT 1"
+    );
     const normalUserTrialDays = tariffSettings?.normal_user_trial_days ?? 15;
-    const premiumUserMaxActiveServices = tariffSettings?.premium_user_max_active_services ?? 5;
-    const normalUserMaxActiveServices = tariffSettings?.normal_user_max_active_services ?? 1;
-    const normalUserMaxChannelsPerService = tariffSettings?.normal_user_max_channels_per_service ?? 1;
-    const premiumUserMaxChannelsPerService = tariffSettings?.premium_user_max_channels_per_service ?? 10;
-
+    const premiumUserMaxActiveServices =
+      tariffSettings?.premium_user_max_active_services ?? 5;
+    const normalUserMaxActiveServices =
+      tariffSettings?.normal_user_max_active_services ?? 1;
+    const normalUserMaxChannelsPerService =
+      tariffSettings?.normal_user_max_channels_per_service ?? 1;
+    const premiumUserMaxChannelsPerService =
+      tariffSettings?.premium_user_max_channels_per_service ?? 10;
 
     if (user.is_admin) {
       userIsEffectivelyPremium = true; // Admins have no restrictions
     } else if (user.premium_expiry_date) {
-        effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
-        userIsEffectivelyPremium = user.is_premium && now < effectiveAccountExpiryDate;
+      effectiveAccountExpiryDate = new Date(user.premium_expiry_date);
+      userIsEffectivelyPremium =
+        user.is_premium && now < effectiveAccountExpiryDate;
     } else if (user.is_premium) {
-        // Premium user without expiry date (e.g., lifetime premium)
-        userIsEffectivelyPremium = true;
+      // Premium user without expiry date (e.g., lifetime premium)
+      userIsEffectivelyPremium = true;
     }
-
 
     if (isActive) {
       // Only apply these checks if trying to ACTIVATE a service
@@ -325,13 +351,14 @@ export async function PUT(request) {
           [decoded.userId, serviceIdToUpdate]
         );
 
-        const maxAllowedActiveServices = user.is_premium ? premiumUserMaxActiveServices : normalUserMaxActiveServices;
+        const maxAllowedActiveServices = user.is_premium
+          ? premiumUserMaxActiveServices
+          : normalUserMaxActiveServices;
         if (activeServicesCount.count >= maxAllowedActiveServices) {
           return NextResponse.json(
             {
               success: false,
-              error:
-                `شما به حداکثر تعداد سرویس‌های فعال (${maxAllowedActiveServices}) رسیده‌اید. برای فعال‌سازی این سرویس، لطفاً ابتدا یک سرویس دیگر را غیرفعال کنید.`,
+              error: `شما به حداکثر تعداد سرویس‌های فعال (${maxAllowedActiveServices}) رسیده‌اید. برای فعال‌سازی این سرویس، لطفاً ابتدا یک سرویس دیگر را غیرفعال کنید.`,
             },
             { status: 403 }
           );
@@ -339,20 +366,29 @@ export async function PUT(request) {
 
         // Check channel limits for current service being activated, if user is NOT admin
         if (!user.is_admin) {
-          const serviceSourceChannels = JSON.parse(serviceToUpdate.source_channels || "[]");
-          const serviceTargetChannels = JSON.parse(serviceToUpdate.target_channels || "[]");
+          const serviceSourceChannels = JSON.parse(
+            serviceToUpdate.source_channels || "[]"
+          );
+          const serviceTargetChannels = JSON.parse(
+            serviceToUpdate.target_channels || "[]"
+          );
 
-          const maxChannelsPerService = user.is_premium ? premiumUserMaxChannelsPerService : normalUserMaxChannelsPerService;
+          const maxChannelsPerService = user.is_premium
+            ? premiumUserMaxChannelsPerService
+            : normalUserMaxChannelsPerService;
 
-          if (serviceSourceChannels.filter(Boolean).length > maxChannelsPerService ||
-              serviceTargetChannels.filter(Boolean).length > maxChannelsPerService) {
-              return NextResponse.json(
-                  {
-                      success: false,
-                      error: `این سرویس دارای تعداد کانال‌های بیشتر از حد مجاز (${maxChannelsPerService} کانال مبدأ/مقصد) برای وضعیت حساب کاربری شماست. لطفاً آن را ویرایش کنید یا اشتراک خود را ارتقا دهید.`,
-                  },
-                  { status: 403 }
-              );
+          if (
+            serviceSourceChannels.filter(Boolean).length >
+              maxChannelsPerService ||
+            serviceTargetChannels.filter(Boolean).length > maxChannelsPerService
+          ) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `این سرویس دارای تعداد کانال‌های بیشتر از حد مجاز (${maxChannelsPerService} کانال مبدأ/مقصد) برای وضعیت حساب کاربری شماست. لطفاً آن را ویرایش کنید یا اشتراک خود را ارتقا دهید.`,
+              },
+              { status: 403 }
+            );
           }
         }
       }
