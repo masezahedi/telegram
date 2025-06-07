@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -15,19 +15,32 @@ import {
   Settings,
   MessageCircle,
   Users,
-  DollarSign, // NEW: Import DollarSign icon
+  DollarSign,
 } from "lucide-react";
 import { AuthService } from "@/lib/services/auth-service";
 import ConnectionStatus from "@/components/dashboard/connection-status";
 
 export default function DashboardLayout({ children, user }) {
   const router = useRouter();
+  const pathname = usePathname(); // Get current path
   const [isMounted, setIsMounted] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+
+  const navLinks = [
+    { href: "/dashboard", label: "داشبورد", icon: Home },
+    { href: "/dashboard/services", label: "سرویس‌ها", icon: MessageCircle },
+    { href: "/dashboard/profile", label: "پروفایل", icon: User },
+    { href: "/dashboard/settings", label: "تنظیمات", icon: Settings },
+  ];
+
+  const adminNavLinks = [
+    { href: "/dashboard/users", label: "مدیریت کاربران", icon: Users },
+    { href: "/dashboard/tariffs", label: "مدیریت تعرفه‌ها", icon: DollarSign },
+  ];
 
   useEffect(() => {
     setIsMounted(true);
 
-    // Verify authentication
     const checkAuth = async () => {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (!isAuthenticated) {
@@ -43,92 +56,64 @@ export default function DashboardLayout({ children, user }) {
     router.push("/login");
   };
 
-  if (!isMounted) return null;
+  const NavLink = ({ href, label, icon: Icon }) => (
+    <Link href={href} passHref>
+      <Button
+        variant={pathname === href ? "secondary" : "ghost"}
+        className="w-full justify-start text-base py-6"
+        onClick={() => setIsSheetOpen(false)}
+      >
+        <Icon className="ml-3 h-5 w-5" /> {label}
+      </Button>
+    </Link>
+  );
+
+  if (!isMounted) return null; // Or a loading skeleton
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
+      <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur">
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sheet>
+            <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon" className="md:hidden">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-64 sm:w-80">
-                <div className="flex flex-col h-full">
-                  <div className="py-4">
-                    <h2 className="text-lg font-semibold mb-2">منوی سایت</h2>
-                    <Separator />
-                  </div>
-                  <div className="flex-1">
-                    <nav className="flex flex-col gap-2">
-                      <Link href="/dashboard" passHref>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
-                        >
-                          <Home className="ml-2 h-5 w-5" /> داشبورد
-                        </Button>
-                      </Link>
-                      <Link href="/dashboard/profile" passHref>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
-                        >
-                          <User className="ml-2 h-5 w-5" /> پروفایل
-                        </Button>
-                      </Link>
-                      <Link href="/dashboard/settings" passHref>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
-                        >
-                          <Settings className="ml-2 h-5 w-5" /> تنظیمات
-                        </Button>
-                      </Link>
-                      <Link href="/dashboard/services" passHref>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
-                        >
-                          <MessageCircle className="ml-2 h-5 w-5" /> سرویس‌ها
-                        </Button>
-                      </Link>
-                      {user?.isAdmin && (
-                        <>
-                          <Link href="/dashboard/users" passHref>
-                            <Button
-                              variant="ghost"
-                              className="w-full justify-start"
-                            >
-                              <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
-                            </Button>
-                          </Link>
-                          <Link href="/dashboard/tariffs" passHref>
-                            <Button
-                              variant="ghost"
-                              className="w-full justify-start"
-                            >
-                              <DollarSign className="ml-2 h-5 w-5" /> مدیریت تعرفه‌ها
-                            </Button>
-                          </Link>
-                        </>
-                      )}
-                    </nav>
-                  </div>
-                  <div className="py-4">
-                    <Separator className="mb-4" />
-                    <Button
-                      onClick={handleLogout}
-                      variant="destructive"
-                      className="w-full"
-                    >
-                      <LogOut className="ml-2 h-5 w-5" /> خروج
-                    </Button>
-                  </div>
+              {/* --- START: Fullscreen Menu Change --- */}
+              <SheetContent
+                side="right"
+                className="w-full h-full p-0 flex flex-col"
+              >
+                {/* --- END: Fullscreen Menu Change --- */}
+                <div className="p-4 border-b">
+                  <h2 className="text-xl font-bold text-center">منوی کاربری</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <nav className="flex flex-col gap-1 p-4">
+                    {navLinks.map((link) => (
+                      <NavLink key={link.href} {...link} />
+                    ))}
+                    {user?.isAdmin && (
+                      <>
+                        <Separator className="my-2" />
+                        {adminNavLinks.map((link) => (
+                          <NavLink key={link.href} {...link} />
+                        ))}
+                      </>
+                    )}
+                  </nav>
+                </div>
+                <div className="p-4 border-t">
+                  <Button
+                    onClick={handleLogout}
+                    variant="destructive"
+                    className="w-full"
+                  >
+                    <LogOut className="ml-2 h-5 w-5" /> خروج از حساب
+                  </Button>
                 </div>
               </SheetContent>
             </Sheet>
@@ -142,7 +127,6 @@ export default function DashboardLayout({ children, user }) {
             {user && (
               <ConnectionStatus isConnected={user.isTelegramConnected} />
             )}
-
             <div className="hidden md:flex items-center gap-4">
               <Button variant="ghost" onClick={handleLogout} size="sm">
                 <LogOut className="ml-2 h-4 w-4" />
@@ -162,41 +146,15 @@ export default function DashboardLayout({ children, user }) {
               <h2 className="text-lg font-semibold mb-2">منوی سایت</h2>
               <Separator className="mb-4" />
               <nav className="flex flex-col gap-1">
-                <Link href="/dashboard" passHref>
-                  <Button variant="ghost" className="w-full justify-start">
-                    <Home className="ml-2 h-5 w-5" /> داشبورد
-                  </Button>
-                </Link>
-                <Link href="/dashboard/profile" passHref>
-                  <Button variant="ghost" className="w-full justify-start">
-                    <User className="ml-2 h-5 w-5" /> پروفایل
-                  </Button>
-                </Link>
-                <Link href="/dashboard/settings" passHref>
-                  <Button variant="ghost" className="w-full justify-start">
-                    <Settings className="ml-2 h-5 w-5" /> تنظیمات
-                  </Button>
-                </Link>
-                <Link href="/dashboard/services" passHref>
-                  <Button variant="ghost" className="w-full justify-start">
-                    <MessageCircle className="ml-2 h-5 w-5" /> سرویس‌ها
-                  </Button>
-                </Link>
+                {navLinks.map((link) => (
+                  <NavLink key={link.href} {...link} />
+                ))}
                 {user?.isAdmin && (
                   <>
-                    <Link href="/dashboard/users" passHref>
-                      <Button variant="ghost" className="w-full justify-start">
-                        <Users className="ml-2 h-5 w-5" /> مدیریت کاربران
-                      </Button>
-                    </Link>
-                    <Link href="/dashboard/tariffs" passHref>
-                      <Button
-                        variant="ghost"
-                        className="w-full justify-start"
-                      >
-                        <DollarSign className="ml-2 h-5 w-5" /> مدیریت تعرفه‌ها
-                      </Button>
-                    </Link>
+                    <Separator className="my-2" />
+                    {adminNavLinks.map((link) => (
+                      <NavLink key={link.href} {...link} />
+                    ))}
                   </>
                 )}
               </nav>
