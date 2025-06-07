@@ -4,31 +4,66 @@ import jwt from "jsonwebtoken";
 import { openDb } from "@/lib/db";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN =
+  process.env.BOT_TOKEN || "7592946651:AAF9k8_vdXc2BKMqZZEgK9djE8ef-mjl0PI";
 
-async function verifyTelegramAuth(initData) {
-  if (!BOT_TOKEN) {
-    console.error("BOT_TOKEN is not defined in environment variables.");
-    throw new Error("Bot token is not configured on the server.");
-  }
-  const urlParams = new URLSearchParams(initData);
-  const hash = urlParams.get("hash");
-  urlParams.delete("hash");
-  const dataCheckString = Array.from(urlParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
+export default function TelegramAuth() {
+  const router = useRouter();
+  const [status, setStatus] = useState("در حال اعتبارسنجی...");
 
-  const secretKey = crypto
-    .createHmac("sha256", "WebAppData")
-    .update(BOT_TOKEN)
-    .digest();
-  const computedHash = crypto
-    .createHmac("sha256", secretKey)
-    .update(dataCheckString)
-    .digest("hex");
+  useEffect(() => {
+    const authenticate = async (tg) => {
+      // tg را به عنوان پارامتر دریافت می‌کند
+      if (!tg.initData) {
+        setStatus(
+          "خطا: اطلاعات تلگرام یافت نشد. لطفاً از طریق اپلیکیشن تلگرام وارد شوید."
+        );
+        toast.error("لطفاً این صفحه را از طریق ربات تلگرام باز کنید.");
+        setTimeout(() => router.replace("/login"), 3000);
+        return;
+      }
 
-  return computedHash === hash;
+      try {
+        const result = await AuthService.telegramLogin(tg.initData);
+        if (result.success) {
+          setStatus("اعتبارسنجی موفق! در حال انتقال به داشبورد...");
+          toast.success("با موفقیت وارد شدید!");
+          router.replace("/dashboard");
+        } else {
+          setStatus(`خطا در اعتبارسنجی: ${result.message}`);
+          toast.error(result.message || "خطا در ورود از طریق تلگرام.");
+        }
+      } catch (error) {
+        console.error("Auth error:", error);
+        setStatus("خطای غیرمنتظره در سرور.");
+        toast.error("خطای غیرمنتظره در سرور.");
+      }
+    };
+
+    // بررسی وجود آبجکت تلگرام
+    if (typeof window.Telegram?.WebApp !== "undefined") {
+      const tg = window.Telegram.WebApp;
+      // منتظر می‌مانیم تا وب‌اپ تلگرام آماده شود
+      tg.ready();
+      // سپس فرآیند احراز هویت را شروع می‌کنیم
+      authenticate(tg);
+    } else {
+      // اگر آبجکت تلگرام حتی پس از بارگذاری اولیه وجود نداشت
+      setStatus("خطا در بارگذاری اسکریپت تلگرام. لطفاً صفحه را رفرش کنید.");
+      toast.error(
+        "اسکریپت تلگرام بارگذاری نشد. لطفاً از داخل اپلیکیشن تلگرام اقدام کنید."
+      );
+      setTimeout(() => router.replace("/login"), 5000);
+    }
+  }, [router]);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 text-center">
+      <div className="h-10 w-10 rounded-full border-4 border-primary border-r-transparent animate-spin mb-4"></div>
+      <h1 className="text-xl font-semibold mb-2">ورود از طریق تلگرام</h1>
+      <p className="text-muted-foreground">{status}</p>
+    </div>
+  );
 }
 
 export async function POST(request) {
