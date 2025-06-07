@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { AuthService } from "@/lib/services/auth-service";
 import { Bot, LogIn, UserPlus } from "lucide-react";
 
+// آیتم‌های منو در اینجا تعریف شده‌اند
+const navItems = [
+  { label: "خانه", href: "/" },
+  { label: "معرفی سرویس‌ها", href: "#" }, // لینک‌ها را در صورت نیاز تغییر دهید
+  { label: "ارتباط با ما", href: "#" },
+  { label: "قوانین", href: "#" },
+];
+
 export default function Home() {
   const router = useRouter();
   // وضعیت احراز هویت: 'loading', 'authenticated', 'unauthenticated'
@@ -18,6 +26,7 @@ export default function Home() {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (isAuthenticated) {
         setAuthStatus("authenticated");
+        // اگر کاربر لاگین کرده بود، به داشبورد منتقل شود
         router.replace("/dashboard");
       } else {
         setAuthStatus("unauthenticated");
@@ -26,6 +35,7 @@ export default function Home() {
     checkAuth();
   }, [router]);
 
+  // نمایش حالت لودینگ تا وضعیت کاربر مشخص شود
   if (authStatus === "loading" || authStatus === "authenticated") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background text-center p-4">
@@ -37,8 +47,29 @@ export default function Home() {
     );
   }
 
+  // نمایش صفحه اصلی برای کاربرانی که لاگین نکرده‌اند
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 overflow-hidden relative">
+      {/* START: منوی جدید و جذاب */}
+      <motion.nav
+        className="absolute top-0 left-0 p-6 z-30"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5, duration: 0.5 }}
+      >
+        <div className="flex items-center gap-4 md:gap-6">
+          {navItems.map((item) => (
+            <Link key={item.label} href={item.href} passHref>
+              <span className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                {item.label}
+              </span>
+            </Link>
+          ))}
+        </div>
+      </motion.nav>
+      {/* END: منوی جدید */}
+
+      {/* Background Effects */}
       <div className="absolute inset-0 z-0 bg-grid-slate-100/10 [mask-image:radial-gradient(ellipse_at_center,white,transparent)] dark:bg-grid-slate-700/10"></div>
       <div className="absolute inset-0 z-10 bg-gradient-to-b from-background/10 via-background to-background"></div>
 
@@ -68,6 +99,7 @@ export default function Home() {
           هوشمند، سریع، قدرتمند
         </h1>
 
+        {/* Slogan & Description */}
         <p className="mt-4 max-w-xl text-lg text-muted-foreground">
           مدیریت کانال‌های تلگرام خود را به سطح جدیدی ببرید.
           <br />
@@ -75,6 +107,7 @@ export default function Home() {
           کنید.
         </p>
 
+        {/* Buttons */}
         <motion.div
           className="mt-10 flex flex-col sm:flex-row items-center gap-4"
           initial={{ opacity: 0, y: 20 }}
