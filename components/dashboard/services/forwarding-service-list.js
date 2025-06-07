@@ -5,7 +5,14 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Info, MessageCircle } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Info,
+  MessageCircle,
+  MoreVertical,
+} from "lucide-react";
 import {
   Table,
   TableBody,
@@ -15,7 +22,32 @@ import {
   TableRow,
   TableCaption,
 } from "@/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { ForwardingService } from "@/lib/services/forwarding-service";
 import ForwardingServiceForm from "./forwarding-service-form";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +58,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { UserService } from "@/lib/services/user-service";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [services, setServices] = useState([]);
@@ -33,18 +66,20 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   const [editingService, setEditingService] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
-  // Extract props passed from parent component. These are now the single source of truth.
-  const isAccountExpired = userAccountStatus?.isExpired;
-  const isTelegramConnected = userAccountStatus?.isTelegramConnected;
-  const isAdmin = userAccountStatus?.isAdmin;
-  const isPremium = userAccountStatus?.isPremium;
-  const isTrialActivated = userAccountStatus?.trialActivated;
-  const normalUserTrialDays =
-    userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
+  const {
+    isExpired: isAccountExpired,
+    isPremium,
+    isAdmin,
+    trialActivated: isTrialActivated,
+    isTelegramConnected,
+    tariffSettings,
+  } = userAccountStatus || {};
+
+  const normalUserTrialDays = tariffSettings?.normalUserTrialDays ?? 15;
   const normalUserMaxActiveServices =
-    userAccountStatus?.tariffSettings?.normalUserMaxActiveServices ?? 1;
+    tariffSettings?.normalUserMaxActiveServices ?? 1;
   const premiumUserMaxActiveServices =
-    userAccountStatus?.tariffSettings?.premiumUserMaxActiveServices ?? 5;
+    tariffSettings?.premiumUserMaxActiveServices ?? 5;
 
   const loadServices = async () => {
     setLoading(true);
@@ -128,12 +163,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
   };
 
   const handleDelete = async (id) => {
-    if (
-      !confirm(
-        "آیا از حذف این سرویس اطمینان دارید؟ این عمل غیرقابل بازگشت است."
-      )
-    )
-      return;
     try {
       const result = await ForwardingService.deleteService(id);
       if (result.success) {
@@ -168,7 +197,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
         return;
       }
     }
-
     setEditingService(service);
     setShowForm(true);
   };
@@ -200,8 +228,24 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-32">
-        <div className="h-8 w-8 rounded-full border-4 border-primary border-r-transparent animate-spin"></div>
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48 self-end" />
+        <div className="rounded-md border p-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <Skeleton className="h-6 w-1/3" />
+            <Skeleton className="h-6 w-12" />
+          </div>
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+        <div className="rounded-md border p-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <Skeleton className="h-6 w-1/3" />
+            <Skeleton className="h-6 w-12" />
+          </div>
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
       </div>
     );
   }
@@ -232,7 +276,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
     );
   }
 
-  // Logic for disabling create button and switches
   const disableCreateNew =
     !isAdmin &&
     (isAccountExpired ||
@@ -240,25 +283,6 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
       (!isPremium && !isTrialActivated));
   const showTrialActivationButton =
     !isAdmin && !isPremium && !isTrialActivated && isTelegramConnected;
-
-  const getSwitchDisabledTooltip = (service) => {
-    if (!isTelegramConnected)
-      return "برای فعال‌سازی، ابتدا تلگرام را متصل کنید.";
-    if (isAccountExpired) return "حساب کاربری شما منقضی شده است.";
-    if (!isPremium && !isTrialActivated)
-      return `برای فعال‌سازی، ابتدا مهلت ${normalUserTrialDays} روزه خود را فعال کنید.`;
-
-    if (!service.is_active) {
-      const currentActiveServices = services.filter((s) => s.is_active).length;
-      const maxActiveServices = isPremium
-        ? premiumUserMaxActiveServices
-        : normalUserMaxActiveServices;
-      if (currentActiveServices >= maxActiveServices) {
-        return `به سقف ${maxActiveServices} سرویس فعال رسیده‌اید.`;
-      }
-    }
-    return null; // No tooltip needed if not disabled
-  };
 
   return (
     <TooltipProvider delayDuration={100}>
@@ -300,43 +324,131 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
           </Alert>
         )}
 
-        {services.length === 0 && !loading ? (
+        {services.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground border-2 border-dashed rounded-lg mt-4">
             <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />
             <p className="font-semibold">هیچ سرویسی یافت نشد.</p>
             <p className="text-sm">برای شروع، یک سرویس جدید ایجاد کنید.</p>
           </div>
         ) : (
-          <div className="rounded-md border overflow-x-auto">
-            <Table className="min-w-full">
-              <TableCaption className="py-4 text-center">
-                لیست سرویس‌های فوروارد و کپی شما.
-              </TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-right w-[200px] ps-4">
-                    نام سرویس
-                  </TableHead>
-                  <TableHead className="text-right w-[150px]">
-                    نوع سرویس
-                  </TableHead>
-                  <TableHead className="text-right">کانال‌های مبدا</TableHead>
-                  <TableHead className="text-right">کانال‌های مقصد</TableHead>
-                  <TableHead className="text-right w-[100px]">وضعیت</TableHead>
-                  <TableHead className="text-center w-[120px] pe-4">
-                    عملیات
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {services.map((service) => {
-                  const switchDisabled =
-                    !isAdmin &&
-                    (isAccountExpired ||
-                      !isTelegramConnected ||
-                      (!isPremium && !isTrialActivated));
-                  const switchTooltip = getSwitchDisabledTooltip(service);
-                  return (
+          <>
+            {/* --- START: Mobile Card View --- */}
+            <div className="md:hidden space-y-4">
+              {services.map((service) => (
+                <Card key={service.id}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <CardTitle className="flex-1">{service.name}</CardTitle>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="h-5 w-5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEdit(service)}>
+                            <Pencil className="ml-2 h-4 w-4" />
+                            ویرایش
+                          </DropdownMenuItem>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <DropdownMenuItem
+                                onSelect={(e) => e.preventDefault()}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="ml-2 h-4 w-4" />
+                                حذف
+                              </DropdownMenuItem>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  آیا مطمئن هستید؟
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  این عمل غیرقابل بازگشت است و سرویس «
+                                  {service.name}» برای همیشه حذف خواهد شد.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>لغو</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(service.id)}
+                                >
+                                  بله، حذف کن
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <CardDescription>
+                      <Badge
+                        variant={
+                          service.type === "copy" ? "secondary" : "default"
+                        }
+                        className="whitespace-nowrap"
+                      >
+                        {service.type === "copy"
+                          ? "کپی کانال"
+                          : "فوروارد خودکار"}
+                      </Badge>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div>
+                      <p className="font-medium text-muted-foreground">مبدأ:</p>
+                      <p className="font-mono text-xs break-all">
+                        {(service.source_channels || []).join("، ")}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">مقصد:</p>
+                      <p className="font-mono text-xs break-all">
+                        {(service.target_channels || []).join("، ")}
+                      </p>
+                    </div>
+                  </CardContent>
+                  <CardFooter className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">
+                      وضعیت:
+                    </span>
+                    <Switch
+                      checked={Boolean(service.is_active)}
+                      onCheckedChange={(checked) =>
+                        handleStatusChange(service.id, checked)
+                      }
+                      dir="ltr"
+                    />
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+
+            {/* --- START: Desktop Table View --- */}
+            <div className="hidden md:block rounded-md border overflow-x-auto">
+              <Table className="min-w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-right w-[200px] ps-4">
+                      نام سرویس
+                    </TableHead>
+                    <TableHead className="text-right w-[150px]">
+                      نوع سرویس
+                    </TableHead>
+                    <TableHead className="text-right">کانال‌های مبدا</TableHead>
+                    <TableHead className="text-right">کانال‌های مقصد</TableHead>
+                    <TableHead className="text-right w-[100px]">
+                      وضعیت
+                    </TableHead>
+                    <TableHead className="text-center w-[120px] pe-4">
+                      عملیات
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {services.map((service) => (
                     <TableRow key={service.id} className="hover:bg-muted/50">
                       <TableCell className="text-right font-medium py-3 ps-4">
                         {service.name}
@@ -353,74 +465,68 @@ export default function ForwardingServiceList({ onUpdate, userAccountStatus }) {
                             : "فوروارد خودکار"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-3 max-w-xs truncate">
+                      <TableCell className="text-right py-3 max-w-xs truncate font-mono text-xs">
                         {(service.source_channels || []).join("، ")}
                       </TableCell>
-                      <TableCell className="text-right py-3 max-w-xs truncate">
+                      <TableCell className="text-right py-3 max-w-xs truncate font-mono text-xs">
                         {(service.target_channels || []).join("، ")}
                       </TableCell>
                       <TableCell className="text-right py-3">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div>
-                              {" "}
-                              {/* Wrapper div for TooltipTrigger */}
-                              <Switch
-                                checked={Boolean(service.is_active)}
-                                onCheckedChange={(checked) =>
-                                  handleStatusChange(service.id, checked)
-                                }
-                                disabled={switchDisabled}
-                                dir="ltr"
-                              />
-                            </div>
-                          </TooltipTrigger>
-                          {switchTooltip && (
-                            <TooltipContent>
-                              <p>{switchTooltip}</p>
-                            </TooltipContent>
-                          )}
-                        </Tooltip>
+                        <Switch
+                          checked={Boolean(service.is_active)}
+                          onCheckedChange={(checked) =>
+                            handleStatusChange(service.id, checked)
+                          }
+                          dir="ltr"
+                        />
                       </TableCell>
                       <TableCell className="text-center py-3 pe-4">
                         <div className="flex justify-center gap-x-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleEdit(service)}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>ویرایش سرویس</p>
-                            </TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(service)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="text-destructive hover:text-destructive/90"
-                                onClick={() => handleDelete(service.id)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>حذف سرویس</p>
-                            </TooltipContent>
-                          </Tooltip>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  آیا مطمئن هستید؟
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  این عمل غیرقابل بازگشت است و سرویس «
+                                  {service.name}» برای همیشه حذف خواهد شد.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>لغو</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(service.id)}
+                                >
+                                  بله، حذف کن
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </div>
     </TooltipProvider>
