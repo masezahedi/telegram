@@ -1,3 +1,5 @@
+// مسیر صحیح: app/(auth)/telegram/page.js
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -38,11 +40,8 @@ export default function TelegramAuth() {
   const [status, setStatus] = useState("در حال اعتبارسنجی...");
 
   useEffect(() => {
-    const authenticate = async () => {
-      if (
-        typeof window.Telegram?.WebApp?.initData === "undefined" ||
-        window.Telegram.WebApp.initData === ""
-      ) {
+    const authenticate = async (tg) => {
+      if (!tg.initData) {
         setStatus(
           "خطا: اطلاعات تلگرام یافت نشد. لطفاً از طریق اپلیکیشن تلگرام وارد شوید."
         );
@@ -52,9 +51,7 @@ export default function TelegramAuth() {
       }
 
       try {
-        const result = await AuthService.telegramLogin(
-          window.Telegram.WebApp.initData
-        );
+        const result = await AuthService.telegramLogin(tg.initData);
         if (result.success) {
           setStatus("اعتبارسنجی موفق! در حال انتقال به داشبورد...");
           toast.success("با موفقیت وارد شدید!");
@@ -70,7 +67,17 @@ export default function TelegramAuth() {
       }
     };
 
-    authenticate();
+    if (typeof window.Telegram?.WebApp !== "undefined") {
+      const tg = window.Telegram.WebApp;
+      tg.ready();
+      authenticate(tg);
+    } else {
+      setStatus("خطا در بارگذاری اسکریپت تلگرام.");
+      toast.error(
+        "اسکریپت تلگرام بارگذاری نشد. لطفاً از داخل اپلیکیشن تلگرام اقدام کنید."
+      );
+      setTimeout(() => router.replace("/login"), 5000);
+    }
   }, [router]);
 
   return (
