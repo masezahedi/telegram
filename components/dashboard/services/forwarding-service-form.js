@@ -120,46 +120,21 @@ export default function ForwardingServiceForm({
   const [loading, setLoading] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
 
-  // Extract tariff settings and user status
-  const normalUserMaxChannelsPerService = userAccountStatus?.tariffSettings?.normalUserMaxChannelsPerService ?? 1;
-  const premiumUserMaxChannelsPerService = userAccountStatus?.tariffSettings?.premiumUserMaxChannelsPerService ?? 10;
-  const normalUserTrialDays = userAccountStatus?.tariffSettings?.normalUserTrialDays ?? 15;
+  // Extract tariff settings and user status from props
+  const {
+    isExpired: isAccountExpired,
+    isPremium,
+    isAdmin,
+    trialActivated: isTrialActuallyActivated,
+    isTelegramConnected,
+    tariffSettings,
+  } = userAccountStatus || {};
 
-  const isTelegramConnected = userAccountStatus?.isTelegramConnected;
-  const isAdmin = userAccountStatus?.isAdmin;
-  const isPremium = userAccountStatus?.isPremium;
-  const trialActivatedAt = userAccountStatus?.trialActivatedAt; // This is the actual timestamp
-  const premiumExpiryDate = userAccountStatus?.premiumExpiryDate; // This is the actual timestamp
-
-
-  // Determine if the user's account is currently expired
-  const now = new Date();
-  let isAccountExpired = false;
-
-  // Check if trialActivatedAt exists (meaning trial was activated)
-  const isTrialActuallyActivated = Boolean(trialActivatedAt);
-
-  if (!isAdmin) {
-    if (isPremium) {
-      // Premium users: check premiumExpiryDate
-      if (premiumExpiryDate && new Date(premiumExpiryDate) < now) {
-        isAccountExpired = true;
-      }
-    } else {
-      // Normal users: check trial_activated_at and calculate expiry based on normalUserTrialDays
-      if (isTrialActuallyActivated) {
-        const trialStartDate = new Date(trialActivatedAt);
-        const trialEndDate = new Date(trialStartDate);
-        trialEndDate.setDate(trialStartDate.getDate() + normalUserTrialDays);
-        if (trialEndDate < now) {
-          isAccountExpired = true;
-        }
-      } else {
-        // If not premium and trial never activated, consider as expired for service creation/activation purposes
-        isAccountExpired = true; // This handles the case where trial hasn't started yet
-      }
-    }
-  }
+  const normalUserMaxChannelsPerService =
+    tariffSettings?.normalUserMaxChannelsPerService ?? 1;
+  const premiumUserMaxChannelsPerService =
+    tariffSettings?.premiumUserMaxChannelsPerService ?? 10;
+  const normalUserTrialDays = tariffSettings?.normalUserTrialDays ?? 15;
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -262,7 +237,6 @@ export default function ForwardingServiceForm({
   ]);
 
   const onSubmit = async (values) => {
-    // NEW LOGIC: Check Telegram connection
     if (!isTelegramConnected) {
       toast.error("لطفاً ابتدا حساب تلگرام خود را متصل کنید.");
       return;
@@ -275,16 +249,15 @@ export default function ForwardingServiceForm({
       return;
     }
 
-    // NEW LOGIC: Prevent creation/editing if user account is expired or trial not activated
     const isNewService = !service?.id;
     if (!isAdmin) {
-      if (isAccountExpired && isNewService) { // Only block new service creation for expired non-admins
+      if (isAccountExpired && isNewService) {
         toast.error(
           "مهلت استفاده شما از سرویس‌ها به پایان رسیده است و نمی‌توانید سرویس جدیدی ایجاد کنید. برای ادامه، لطفاً اشتراک خود را ارتقا دهید."
         );
         return;
       }
-      if (!isPremium && !isTrialActuallyActivated && isNewService) { // Only for new services if normal user and trial not activated
+      if (!isPremium && !isTrialActuallyActivated && isNewService) {
         toast.error(
           `لطفاً برای شروع ایجاد سرویس، مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید. (در بخش لیست سرویس‌ها)`
         );
@@ -319,7 +292,6 @@ export default function ForwardingServiceForm({
       return;
     }
 
-    // Client-side channel count validation based on tariff settings
     if (!isAdmin) {
       const currentMaxChannels = isPremium
         ? premiumUserMaxChannelsPerService
@@ -332,12 +304,17 @@ export default function ForwardingServiceForm({
         const role = isPremium ? "پرمیوم" : "عادی";
         const errorMsg = `کاربران ${role} حداکثر می‌توانند ${currentMaxChannels} کانال مبدأ و ${currentMaxChannels} کانال مقصد تعریف کنند.`;
         toast.error(errorMsg);
-        form.setError("sourceChannels.0", { type: "manual", message: errorMsg });
-        form.setError("targetChannels.0", { type: "manual", message: errorMsg });
+        form.setError("sourceChannels.0", {
+          type: "manual",
+          message: errorMsg,
+        });
+        form.setError("targetChannels.0", {
+          type: "manual",
+          message: errorMsg,
+        });
         return;
       }
     }
-
 
     if (values.type === "copy") {
       if (values.startFromId && values.startFromId.trim()) {
@@ -416,15 +393,12 @@ export default function ForwardingServiceForm({
   const copyHistoryEnabled = form.watch("copyHistory");
   const startFromIdWatched = form.watch("startFromId");
 
-  // Determine channel limits message
   const channelLimitMessage = isAdmin
     ? "مدیران محدودیتی در تعداد کانال ندارند."
     : isPremium
-      ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`
-      : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
+    ? `کاربران پرمیوم می‌توانند حداکثر ${premiumUserMaxChannelsPerService} کانال مبدأ و ${premiumUserMaxChannelsPerService} کانال مقصد تعریف کنند.`
+    : `کاربران عادی می‌توانند حداکثر ${normalUserMaxChannelsPerService} کانال مبدأ و ${normalUserMaxChannelsPerService} کانال مقصد تعریف کنند.`;
 
-
-  // NEW LOGIC: Conditional rendering based on Telegram connection and trial status
   if (!isTelegramConnected) {
     return (
       <div className="text-center py-8">
@@ -441,16 +415,16 @@ export default function ForwardingServiceForm({
     );
   }
 
-  // NEW LOGIC: Block new service creation if account is expired or trial not activated
-  if (!service?.id && !isAdmin && (isAccountExpired)) { // Simplified: isAccountExpired already covers trial not activated
+  if (!service?.id && !isAdmin && isAccountExpired) {
     return (
       <Alert variant="destructive">
         <Info className="h-4 w-4" />
         <AlertTitle>محدودیت ایجاد سرویس</AlertTitle>
         <AlertDescription>
           امکان ایجاد سرویس جدید وجود ندارد. لطفاً{" "}
-          {!isPremium && !isTrialActuallyActivated ? `مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید` : ""}
-          {isAccountExpired ? " یا اشتراک خود را ارتقا دهید." : "."}
+          {!isPremium && !isTrialActuallyActivated
+            ? `مهلت ${normalUserTrialDays} روزه آزمایشی خود را فعال کنید`
+            : "اشتراک خود را ارتقا دهید."}
         </AlertDescription>
       </Alert>
     );
@@ -541,13 +515,13 @@ export default function ForwardingServiceForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-             <Alert variant="default" className="border-info text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400">
+            <Alert
+              variant="default"
+              className="border-info text-info dark:border-blue-700 dark:text-blue-300 dark:[&>svg]:text-blue-400"
+            >
               <Info className="h-4 w-4" />
-              <AlertDescription>
-                {channelLimitMessage}
-              </AlertDescription>
+              <AlertDescription>{channelLimitMessage}</AlertDescription>
             </Alert>
-            {/* Source Channels Section */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium block text-right">
                 {" "}
@@ -557,8 +531,7 @@ export default function ForwardingServiceForm({
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
               {isCopyService
-                ? // Only render the first field for copy service type
-                  sourceFields.length > 0 && ( // Ensure field exists before rendering
+                ? sourceFields.length > 0 && (
                     <FormField
                       control={form.control}
                       name={`sourceChannels.0`}
@@ -623,7 +596,6 @@ export default function ForwardingServiceForm({
               )}
             </div>
 
-            {/* Target Channels Section */}
             <div className="space-y-3 rounded-md border p-4">
               <FormLabel className="text-base font-medium block text-right">
                 {isCopyService ? "کانال مقصد" : "کانال‌های مقصد"}
@@ -632,8 +604,7 @@ export default function ForwardingServiceForm({
                 نام کاربری کانال(ها) بدون @ یا با @ وارد شود.
               </FormDescription>
               {isCopyService
-                ? // Only render the first field for copy service type
-                  targetFields.length > 0 && ( // Ensure field exists
+                ? targetFields.length > 0 && (
                     <FormField
                       control={form.control}
                       name={`targetChannels.0`}
@@ -1016,10 +987,7 @@ export default function ForwardingServiceForm({
             type="submit"
             size="lg"
             className="w-full sm:w-auto"
-            disabled={
-              loading ||
-              (!service?.id && !isAdmin && (isAccountExpired))
-            }
+            disabled={loading || (!service?.id && !isAdmin && isAccountExpired)}
           >
             {loading
               ? "در حال پردازش..."
