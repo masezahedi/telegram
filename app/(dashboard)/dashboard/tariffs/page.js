@@ -25,17 +25,29 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription
+  FormDescription,
 } from "@/components/ui/form";
 import DashboardLayout from "@/components/dashboard/dashboard-layout";
 
 const formSchema = z.object({
-  normal_user_trial_days: z.coerce.number().min(0, "تعداد روز باید مثبت یا صفر باشد."),
-  premium_user_default_days: z.coerce.number().min(0, "تعداد روز باید مثبت یا صفر باشد."),
-  normal_user_max_active_services: z.coerce.number().min(0, "تعداد سرویس باید مثبت یا صفر باشد."),
-  premium_user_max_active_services: z.coerce.number().min(0, "تعداد سرویس باید مثبت یا صفر باشد."),
-  normal_user_max_channels_per_service: z.coerce.number().min(0, "تعداد کانال باید مثبت یا صفر باشد."),
-  premium_user_max_channels_per_service: z.coerce.number().min(0, "تعداد کانال باید مثبت یا صفر باشد."),
+  normal_user_trial_days: z.coerce
+    .number()
+    .min(0, "تعداد روز باید مثبت یا صفر باشد."),
+  premium_user_default_days: z.coerce
+    .number()
+    .min(0, "تعداد روز باید مثبت یا صفر باشد."),
+  normal_user_max_active_services: z.coerce
+    .number()
+    .min(0, "تعداد سرویس باید مثبت یا صفر باشد."),
+  premium_user_max_active_services: z.coerce
+    .number()
+    .min(0, "تعداد سرویس باید مثبت یا صفر باشد."),
+  normal_user_max_channels_per_service: z.coerce
+    .number()
+    .min(0, "تعداد کانال باید مثبت یا صفر باشد."),
+  premium_user_max_channels_per_service: z.coerce
+    .number()
+    .min(0, "تعداد کانال باید مثبت یا صفر باشد."),
 });
 
 export default function TariffSettings() {
@@ -79,10 +91,14 @@ export default function TariffSettings() {
           form.reset({
             normal_user_trial_days: settings.normal_user_trial_days,
             premium_user_default_days: settings.premium_user_default_days,
-            normal_user_max_active_services: settings.normal_user_max_active_services,
-            premium_user_max_active_services: settings.premium_user_max_active_services,
-            normal_user_max_channels_per_service: settings.normal_user_max_channels_per_service,
-            premium_user_max_channels_per_service: settings.premium_user_max_channels_per_service,
+            normal_user_max_active_services:
+              settings.normal_user_max_active_services,
+            premium_user_max_active_services:
+              settings.premium_user_max_active_services,
+            normal_user_max_channels_per_service:
+              settings.normal_user_max_channels_per_service,
+            premium_user_max_channels_per_service:
+              settings.premium_user_max_channels_per_service,
           });
         }
       } catch (error) {
@@ -136,7 +152,10 @@ export default function TariffSettings() {
           </CardHeader>
           <CardContent>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <form
+                onSubmit={form.handleSubmit(onSubmit)}
+                className="space-y-6"
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <FormField
                     control={form.control}
@@ -148,7 +167,8 @@ export default function TariffSettings() {
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          تعداد روزهای مهلت استفاده برای کاربران عادی پس از فعال‌سازی اولین سرویس.
+                          تعداد روزهای مهلت استفاده برای کاربران عادی پس از
+                          فعال‌سازی اولین سرویس.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -159,12 +179,15 @@ export default function TariffSettings() {
                     name="premium_user_default_days"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>مدت زمان پیش‌فرض کاربران پرمیوم (روز)</FormLabel>
+                        <FormLabel>
+                          مدت زمان پیش‌فرض کاربران پرمیوم (روز)
+                        </FormLabel>
                         <FormControl>
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          تعداد روزهای پیش‌فرض اشتراک برای کاربران پرمیوم (اگر تاریخ انقضا دستی تنظیم نشده باشد).
+                          تعداد روزهای پیش‌فرض اشتراک برای کاربران پرمیوم (اگر
+                          تاریخ انقضا دستی تنظیم نشده باشد).
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -180,7 +203,8 @@ export default function TariffSettings() {
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          حداکثر تعداد سرویس‌های فوروارد/کپی که یک کاربر عادی می‌تواند همزمان فعال داشته باشد.
+                          حداکثر تعداد سرویس‌های فوروارد/کپی که یک کاربر عادی
+                          می‌تواند همزمان فعال داشته باشد.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -196,23 +220,27 @@ export default function TariffSettings() {
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          حداکثر تعداد سرویس‌های فوروارد/کپی که یک کاربر پرمیوم می‌تواند همزمان فعال داشته باشد.
+                          حداکثر تعداد سرویس‌های فوروارد/کپی که یک کاربر پرمیوم
+                          می‌تواند همزمان فعال داشته باشد.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                    <FormField
+                  <FormField
                     control={form.control}
                     name="normal_user_max_channels_per_service"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>حداکثر کانال در هر سرویس (کاربر عادی)</FormLabel>
+                        <FormLabel>
+                          حداکثر کانال در هر سرویس (کاربر عادی)
+                        </FormLabel>
                         <FormControl>
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          حداکثر تعداد کانال‌های مبدا و مقصد که یک کاربر عادی می‌تواند در یک سرویس تعریف کند.
+                          حداکثر تعداد کانال‌های مبدا و مقصد که یک کاربر عادی
+                          می‌تواند در یک سرویس تعریف کند.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -223,12 +251,15 @@ export default function TariffSettings() {
                     name="premium_user_max_channels_per_service"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>حداکثر کانال در هر سرویس (کاربر پرمیوم)</FormLabel>
+                        <FormLabel>
+                          حداکثر کانال در هر سرویس (کاربر پرمیوم)
+                        </FormLabel>
                         <FormControl>
                           <Input type="number" {...field} min="0" />
                         </FormControl>
                         <FormDescription>
-                          حداکثر تعداد کانال‌های مبدا و مقصد که یک کاربر پرمیوم می‌تواند در یک سرویس تعریف کند.
+                          حداکثر تعداد کانال‌های مبدا و مقصد که یک کاربر پرمیوم
+                          می‌تواند در یک سرویس تعریف کند.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
