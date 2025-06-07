@@ -11,7 +11,7 @@ import { Bot, LogIn, UserPlus } from "lucide-react";
 // آیتم‌های منو در اینجا تعریف شده‌اند
 const navItems = [
   { label: "خانه", href: "/" },
-  { label: "معرفی سرویس‌ها", href: "#" }, // لینک‌ها را در صورت نیاز تغییر دهید
+  { label: "معرفی سرویس‌ها", href: "/services-info" }, // لینک‌ها را در صورت نیاز تغییر دهید
   { label: "ارتباط با ما", href: "#" },
   { label: "قوانین", href: "#" },
 ];
