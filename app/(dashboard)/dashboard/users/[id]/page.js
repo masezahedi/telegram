@@ -290,6 +290,20 @@ export default function UserDetails({ params }) {
                 <Label>تاریخ انقضای حساب</Label>
                 <Input value={formattedPremiumExpiry} readOnly />
               </div>
+              {/* START: Added Fields */}
+              <div>
+                <Label>مهلت آزمایشی استفاده شده</Label>
+                <Input
+                  value={userData.trial_activated_at ? "بله" : "خیر"}
+                  className={userData.trial_activated_at ? "text-success" : ""}
+                  readOnly
+                />
+              </div>
+              <div>
+                <Label>تعداد کل سرویس‌های ایجاد شده</Label>
+                <Input value={userData.service_creation_count ?? 0} readOnly />
+              </div>
+              {/* END: Added Fields */}
             </div>
             {/* Other details like API key and session can remain */}
           </CardContent>
